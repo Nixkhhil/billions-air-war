@@ -1,510 +1,205 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Aircraft Battle — Mobile (Cinematic)</title>
-<style>
-  :root{--ui-size:12px}
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%;background:#000;overflow:hidden;-webkit-user-select:none;user-select:none}
-  /* cinematic container: center game area with top/bottom black bars */
-  .screen-wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
-  .game-frame{
-    width:100%;
-    height:90vh;                 /* GAME area (90% of viewport height) */
-    max-width:720px;            /* optional limit for very wide phones */
-    background:#000;            /* inside will be canvas background image */
-    border-radius:6px;
-    overflow:hidden;
-    position:relative;
-    box-shadow:0 8px 30px rgba(0,0,0,0.6);
-  }
-  canvas{display:block;width:100%;height:100%;touch-action:none;background:transparent}
-  /* HUD */
-  #hud{position:absolute;left:8px;top:8px;z-index:60;color:#fff;font-family:Arial,Helvetica,sans-serif}
-  #score{font-weight:700;font-size:16px}
-  .hearts img{width:34px;height:34px;margin-left:6px;vertical-align:middle}
-  /* power icons */
-  .power-row{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:8px;z-index:60}
-  .power-row img{width:46px;height:46px}
-  /* controls (bottom) */
-  .controls{position:absolute;left:8px;right:8px;bottom:8px;display:flex;justify-content:space-between;z-index:70;pointer-events:none}
-  .group{display:flex;gap:10px;pointer-events:auto}
-  .btn{width:58px;height:58px;border-radius:10px;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;touch-action:none}
-  .pauseBtn{width:74px;height:74px;border-radius:18px;background:linear-gradient(180deg,#ffb86b,#ff7a00)}
-  #loading{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-family:Arial;z-index:90}
-  @media(max-width:420px){
-    .hearts img{width:30px;height:30px}
-    .power-row img{width:40px;height:40px}
-    .btn{width:48px;height:48px}
-    .pauseBtn{width:64px;height:64px}
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aircraft Game</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    canvas {
+      background: url("assets/background.png") repeat-y center/cover;
+      display: block;
+      width: 100vw;
+      height: 75vh;
+      position: relative;
+      box-shadow: 0 -10vh 0 black inset, 0 10vh 0 black inset;
+    }
+  </style>
 </head>
 <body>
-  <div class="screen-wrap">
-    <div class="game-frame" id="frame">
-      <canvas id="gameCanvas"></canvas>
+  <canvas id="gameCanvas"></canvas>
 
-      <div id="hud">
-        <div id="score">Score: <span id="scoreVal">0</span></div>
-        <div class="hearts" id="hearts">
-          <img src="./assets/heart.png" id="h1"><img src="./assets/heart.png" id="h2"><img src="./assets/heart.png" id="h3">
-        </div>
-      </div>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
 
-      <div class="power-row" id="powerRow" style="display:none"></div>
+    // set fixed aspect for mobile view
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight * 0.75;
 
-      <div class="controls">
-        <div class="group">
-          <div class="btn" id="leftBtn">◀</div>
-          <div class="btn" id="rightBtn">▶</div>
-        </div>
-        <div class="group">
-          <div class="btn pauseBtn" id="pauseBtn">PAUSE</div>
-        </div>
-      </div>
+    window.addEventListener("resize", () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight * 0.75;
+    });
 
-      <div id="loading">Loading assets... 0%</div>
-    </div>
-  </div>
+    const playerImg = new Image();
+    playerImg.src = "assets/player.png";
 
-  <audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
+    const enemyImg = new Image();
+    enemyImg.src = "assets/enemy.png";
 
-<script>
-/* ------------------ CONFIG & ASSET PATHS ------------------ */
-const ASSETS = {
-  bg: './assets/background.png',
-  player: './assets/player.png',
-  enemy: './assets/enemy.png',
-  boss: './assets/boss.png',
-  bulletP: './assets/bullet_green.png',
-  bulletE: './assets/bullet_red.png',
-  powerDouble: './assets/power_double_fire.png',
-  powerShield: './assets/power_shield.png',
-  powerLife: './assets/power_extra_life.png',
-  heart: './assets/heart.png'
-};
-const BGM = './sounds/bgm.mpeg';
+    const bulletImg = new Image();
+    bulletImg.src = "assets/bullet_green.png";
 
-/* ------------------ CANVAS SETUP ------------------ */
-const frame = document.getElementById('frame');
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+    const enemyBulletImg = new Image();
+    enemyBulletImg.src = "assets/bullet_red.png";
 
-function fitCanvasToFrame(){
-  // set logical canvas size to pixel size of frame
-  const rect = frame.getBoundingClientRect();
-  canvas.width = Math.round(rect.width);
-  canvas.height = Math.round(rect.height);
-}
-fitCanvasToFrame();
-window.addEventListener('resize', () => { fitCanvasToFrame(); positionPlayer(); });
+    const powerImgs = [
+      "assets/power_double_fire.png",
+      "assets/power_shield.png",
+      "assets/power_extra_life.png"
+    ].map(src => {
+      const img = new Image();
+      img.src = src;
+      return img;
+    });
 
-/* ------------------ LOADING ASSETS ------------------ */
-const imgs = {};
-let toLoad = Object.keys(ASSETS).length;
-const loadingEl = document.getElementById('loading');
+    const player = {
+      x: canvas.width / 2 - 25,
+      y: canvas.height - 80,
+      width: 50,
+      height: 50,
+      speed: 8
+    };
 
-Object.entries(ASSETS).forEach(([k, path])=>{
-  const i = new Image();
-  i.src = path;
-  i.onload = ()=>{ imgs[k] = i; toLoad--; loadingEl.textContent = `Loading assets... ${Math.round((Object.keys(ASSETS).length - toLoad)/Object.keys(ASSETS).length*100)}%`; if(toLoad===0) startGame(); };
-  i.onerror = ()=>{ loadingEl.textContent = `Error loading ${path}`; console.error('Asset load error', path); };
-});
+    const bullets = [];
+    const enemies = [];
+    const enemyBullets = [];
+    const powers = [];
 
-/* ------------------ AUDIO ------------------ */
-const bgm = document.getElementById('bgm');
-bgm.volume = 0.45;
-function ensurePlayBgm(){ bgm.play().catch(()=>{ document.addEventListener('touchstart', ()=> bgm.play(), {once:true}); }); }
+    let lastEnemySpawn = 0;
+    let lastEnemyShot = 0;
+    let lastPowerSpawn = 0;
 
-/* ------------------ GAME STATE ------------------ */
-let running = false;
-let score = 0;
-const scoreVal = document.getElementById('scoreVal');
-const heartEls = [document.getElementById('h1'), document.getElementById('h2'), document.getElementById('h3')];
-const powerRow = document.getElementById('powerRow');
+    function spawnEnemy() {
+      const enemy = {
+        x: Math.random() * (canvas.width - 50),
+        y: -50,
+        width: 50,
+        height: 50,
+        speed: 2
+      };
+      enemies.push(enemy);
+    }
 
-const player = {
-  w: 96, h:96, x:0, y:0,
-  speed: 8,
-  lives: 3,
-  blinkUntil: 0,
-  shieldUntil: 0,
-  fireLevel: 0   // 0 single, 1 double, 2 triple
-};
+    function spawnPower() {
+      const power = {
+        x: Math.random() * (canvas.width - 40),
+        y: -40,
+        width: 40,
+        height: 40,
+        speed: 1.5,
+        img: powerImgs[Math.floor(Math.random() * powerImgs.length)]
+      };
+      powers.push(power);
+    }
 
-let bgY = 0, bgSpeed = 1.6;
-let enemies = [], bosses = [], bulletsP = [], bulletsE = [], powers = [];
-let lastSpawn = 0, lastAutoFire = 0;
+    function drawPlayer() {
+      ctx.drawImage(playerImg, player.x, player.y, player.width, player.height);
+    }
 
-/* boss spawn flags */
-let bossSpawnedAt200=false, bossSpawnedAt600=false, bossSpawnedAt1000=false;
+    function drawEnemies() {
+      enemies.forEach(enemy =>
+        ctx.drawImage(enemyImg, enemy.x, enemy.y, enemy.width, enemy.height)
+      );
+    }
 
-/* ------------------ INPUTS ------------------ */
-const keyState = {};
-window.addEventListener('keydown', e => keyState[e.key] = true);
-window.addEventListener('keyup', e => keyState[e.key] = false);
+    function drawBullets() {
+      bullets.forEach(bullet =>
+        ctx.drawImage(bulletImg, bullet.x, bullet.y, bullet.width, bullet.height)
+      );
+    }
 
-let touchLeft=false, touchRight=false, dragging=false, lastTouchX=null;
-document.getElementById('leftBtn').addEventListener('touchstart', e=>{ e.preventDefault(); touchLeft=true }, {passive:false});
-document.getElementById('leftBtn').addEventListener('touchend', e=>{ e.preventDefault(); touchLeft=false }, {passive:false});
-document.getElementById('rightBtn').addEventListener('touchstart', e=>{ e.preventDefault(); touchRight=true }, {passive:false});
-document.getElementById('rightBtn').addEventListener('touchend', e=>{ e.preventDefault(); touchRight=false }, {passive:false});
-document.getElementById('pauseBtn').addEventListener('click', ()=>{ running = !running; if(running) requestAnimationFrame(loop); });
+    function drawEnemyBullets() {
+      enemyBullets.forEach(b =>
+        ctx.drawImage(enemyBulletImg, b.x, b.y, b.width, b.height)
+      );
+    }
 
-canvas.addEventListener('touchstart', e=>{ dragging=true; lastTouchX = e.touches[0].clientX; ensurePlayBgm(); }, {passive:false});
-canvas.addEventListener('touchmove', e=>{ e.preventDefault(); if(dragging){ const tx = e.touches[0].clientX; const dx = tx - lastTouchX; player.x += dx; lastTouchX = tx; } }, {passive:false});
-canvas.addEventListener('touchend', e=>{ dragging=false; lastTouchX = null; }, {passive:false});
-canvas.addEventListener('mousedown', e=>{ dragging=true; lastTouchX = e.clientX; ensurePlayBgm(); });
-canvas.addEventListener('mousemove', e=>{ if(dragging){ const dx = e.clientX - lastTouchX; player.x += dx; lastTouchX = e.clientX; }});
-canvas.addEventListener('mouseup', e=>{ dragging=false; lastTouchX=null; });
+    function drawPowers() {
+      powers.forEach(p =>
+        ctx.drawImage(p.img, p.x, p.y, p.width, p.height)
+      );
+    }
 
-/* ------------------ HELPERS ------------------ */
-function rand(a,b){ return Math.random()*(b-a)+a; }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function now(){ return performance.now(); }
-function rectOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+    function update() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-/* ------------------ HUD ------------------ */
-function updateHUD(){
-  scoreVal.textContent = score;
-  for(let i=0;i<3;i++) heartEls[i].style.display = (i < player.lives) ? 'inline-block' : 'none';
-  // show active powers
-  powerRow.innerHTML = '';
-  if(player.fireLevel>0){
-    const img = document.createElement('img'); img.src = ASSETS.powerDouble; img.title = (player.fireLevel===1?'Double Fire':'Triple Fire'); powerRow.appendChild(img);
-  }
-  if(player.shieldUntil > Date.now()){
-    const img = document.createElement('img'); img.src = ASSETS.powerShield; img.title = 'Shield'; powerRow.appendChild(img);
-  }
-  powerRow.style.display = powerRow.children.length ? 'flex' : 'none';
-}
+      // Player Movement
+      document.onkeydown = function(e) {
+        if (e.key === "ArrowLeft" && player.x > 0) player.x -= player.speed;
+        if (e.key === "ArrowRight" && player.x + player.width < canvas.width)
+          player.x += player.speed;
+      };
 
-/* ------------------ SPAWN & SIZES ------------------ */
-function positionPlayer(){
-  // scale player to frame size
-  player.w = Math.round(Math.min(canvas.width*0.14, imgs.player.width));
-  player.h = Math.round(player.w * (imgs.player.height / imgs.player.width));
-  player.x = (canvas.width - player.w)/2;
-  player.y = canvas.height - player.h - Math.round(canvas.height*0.03); // leave small bottom margin inside frame
-}
-function spawnEnemy(){
-  const w = Math.round(Math.min(canvas.width*0.12, imgs.enemy.width));
-  const h = Math.round(w * (imgs.enemy.height / imgs.enemy.width));
-  enemies.push({ x: rand(8, canvas.width - w - 8), y: -h - 8, w, h, speed: rand(1.2,2.1), hits:0, fade:false, alpha:1 });
-}
-function spawnPower(x,y){
-  const types = ['life','double','shield'];
-  const t = types[Math.floor(Math.random()*types.length)];
-  const w = Math.round(Math.min(canvas.width*0.09, imgs.powerDouble.width));
-  const h = Math.round(w * (imgs.powerDouble.height / imgs.powerDouble.width));
-  powers.push({ x, y, w, h, type: t, vy: 1.2 });
-}
-function spawnBossCount(n){
-  bosses = [];
-  const w = Math.round(Math.min(canvas.width*0.28, imgs.boss.width));
-  const h = Math.round(w * (imgs.boss.height / imgs.boss.width));
-  if(n===1){
-    bosses.push({ x:(canvas.width-w)/2, y:40, w, h, vx:1.4, hp:40, fade:false, alpha:1 });
-  } else if(n===2){
-    bosses.push({ x:60, y:40, w, h, vx:1.4, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:canvas.width-60-w, y:40, w, h, vx:-1.4, hp:40, fade:false, alpha:1 });
-  } else if(n===3){
-    bosses.push({ x:40, y:30, w, h, vx:1.4, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:(canvas.width-w)/2, y:20, w, h, vx:0.9, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:canvas.width-40-w, y:30, w, h, vx:-1.4, hp:40, fade:false, alpha:1 });
-  }
-}
+      // Bullets update
+      bullets.forEach(b => b.y -= 6);
+      bullets.filter(b => b.y > 0);
 
-/* ------------------ SHOOT / FIRE ------------------ */
-function autoFireTick(){
-  const bw = Math.round(player.w*0.14), bh = Math.round(player.h*0.28);
-  if(player.fireLevel===0){
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-  } else if(player.fireLevel===1){
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-  } else {
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 4, w: bw, h: bh, spd: 14 });
-  }
-}
+      // Enemy update
+      enemies.forEach(e => e.y += e.speed);
 
-function enemyFire(e){
-  const bw = Math.round(e.w*0.12), bh = Math.round(e.h*0.28);
-  bulletsE.push({ x: e.x + e.w/2 - bw/2, y: e.y + e.h + 4, w: bw, h: bh, spd: 5, color:'red' });
-}
+      // Enemy bullets update
+      enemyBullets.forEach(b => b.y += 3);
 
-function bossFire(b){
-  const bw = Math.round(b.w*0.14), bh = Math.round(b.h*0.28);
-  // lanes: left, center-left, center-right, right (clamped)
-  const lanes = [ b.x + 10, b.x + b.w*0.33, b.x + b.w*0.66, b.x + b.w - bw - 10 ];
-  for(let i=0;i<4;i++){
-    const lx = clamp(lanes[i], 6, canvas.width - bw - 6);
-    bulletsE.push({ x: lx, y: b.y + b.h + 6, w: bw, h: bh, spd: 6, color:'green' });
-  }
-}
+      // Powers update
+      powers.forEach(p => p.y += p.speed);
 
-/* ------------------ UPDATE ------------------ */
-let lastTime = performance.now();
-let lastSpawnTime = 0;
-let lastAutoFireTime = 0;
+      // Draw everything
+      drawPlayer();
+      drawEnemies();
+      drawBullets();
+      drawEnemyBullets();
+      drawPowers();
 
-function update(ts){
-  const dt = Math.max(1, ts - lastTime);
-  lastTime = ts;
-
-  // background scroll
-  bgY += bgSpeed * (dt/16);
-  if(bgY >= canvas.height) bgY = 0;
-
-  // movement
-  if(keyState.ArrowLeft || touchLeft) player.x -= player.speed * (dt/16);
-  if(keyState.ArrowRight || touchRight) player.x += player.speed * (dt/16);
-  player.x = clamp(player.x, 6, canvas.width - player.w - 6);
-
-  // spawn enemies/powerups
-  if(Date.now() - lastSpawn > 650){
-    lastSpawn = Date.now();
-    if(Math.random() < 0.9) spawnEnemy();
-    if(Math.random() < 0.08) spawnPower(rand(40, canvas.width-80), -40);
-  }
-
-  // auto-fire timing
-  if(Date.now() - lastAutoFire > 220){
-    lastAutoFire = Date.now();
-    autoFireTick();
-  }
-
-  // update enemies
-  for(let i=enemies.length-1;i>=0;i--){
-    const e = enemies[i];
-    e.y += e.speed * (dt/16);
-    if(Math.random() < 0.006) enemyFire(e);
-    if(e.y > canvas.height + 80) enemies.splice(i,1);
-  }
-
-  // update bosses
-  for(let i=bosses.length-1;i>=0;i--){
-    const b = bosses[i];
-    b.x += b.vx * (dt/16);
-    if(b.x < 8 || b.x + b.w > canvas.width - 8) b.vx *= -1;
-    if(Math.random() < 0.012) bossFire(b);
-  }
-
-  // bullets update
-  for(let i=bulletsP.length-1;i>=0;i--){
-    bulletsP[i].y -= bulletsP[i].spd * (dt/16);
-    if(bulletsP[i].y < -60) bulletsP.splice(i,1);
-  }
-  for(let i=bulletsE.length-1;i>=0;i--){
-    bulletsE[i].y += bulletsE[i].spd * (dt/16);
-    if(bulletsE[i].y > canvas.height + 80) bulletsE.splice(i,1);
-  }
-
-  // powers update
-  for(let i=powers.length-1;i>=0;i--){
-    powers[i].y += powers[i].vy * (dt/16);
-    if(powers[i].y > canvas.height + 60) powers.splice(i,1);
-  }
-
-  // collisions: player bullets -> enemies (3 hits)
-  for(let i=bulletsP.length-1;i>=0;i--){
-    const pb = bulletsP[i];
-    // enemies
-    for(let j=enemies.length-1;j>=0;j--){
-      const e = enemies[j];
-      if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:e.x,y:e.y,w:e.w,h:e.h})){
-        bulletsP.splice(i,1);
-        e.hits++;
-        e.alpha = 1;
-        if(e.hits >= 3){
-          e.fade = true; e.alpha = 1;
-          if(Math.random() < 0.28) spawnPower(e.x, e.y);
-          score += 10;
-          updateHUD();
-        }
-        break;
+      // Spawn enemy (slow rate)
+      if (Date.now() - lastEnemySpawn > 2500) {
+        spawnEnemy();
+        lastEnemySpawn = Date.now();
       }
-    }
-    // bosses
-    for(let bi=bosses.length-1;bi>=0;bi--){
-      const bo = bosses[bi];
-      if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:bo.x,y:bo.y,w:bo.w,h:bo.h})){
-        bulletsP.splice(i,1);
-        bo.hp -= 1; // each bullet counts 1 toward 40
-        bo.alpha = 1;
-        if(bo.hp <= 0){
-          bo.fade = true; bo.alpha = 1;
-        }
-        score += 1;
-        updateHUD();
-        break;
+
+      // Enemy fire latency (slow rate)
+      if (Date.now() - lastEnemyShot > 1800) {
+        enemies.forEach(e => {
+          enemyBullets.push({
+            x: e.x + e.width / 2 - 5,
+            y: e.y + e.height,
+            width: 10,
+            height: 20
+          });
+        });
+        lastEnemyShot = Date.now();
       }
-    }
-  }
 
-  // fade & remove enemies
-  for(let i=enemies.length-1;i>=0;i--){
-    const e = enemies[i];
-    if(e.fade){
-      e.alpha -= 0.06 * (dt/16);
-      if(e.alpha <= 0) enemies.splice(i,1);
-    }
-  }
-  // fade & remove bosses
-  for(let i=bosses.length-1;i>=0;i--){
-    const b = bosses[i];
-    if(b.fade){
-      b.alpha -= 0.03 * (dt/16);
-      if(b.alpha <= 0){
-        bosses.splice(i,1);
-        score += 100;
-        updateHUD();
+      // Power spawn (spread randomly)
+      if (Date.now() - lastPowerSpawn > 8000) {
+        spawnPower();
+        lastPowerSpawn = Date.now();
       }
+
+      requestAnimationFrame(update);
     }
-  }
 
-  // enemy bullets -> player
-  for(let i=bulletsE.length-1;i>=0;i--){
-    const eb = bulletsE[i];
-    if(rectOverlap({x:eb.x,y:eb.y,w:eb.w,h:eb.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
-      bulletsE.splice(i,1);
-      if(player.shieldUntil > Date.now()){
-        // protected
-      } else {
-        player.lives--; player.blinkUntil = Date.now() + 1000; updateHUD();
-        if(player.lives <= 0){
-          running = false;
-          setTimeout(()=>{ alert('Game Over! Final Score: '+score); location.reload(); }, 80);
-          return;
-        }
-      }
-    }
-  }
+    // Fire bullets on touch
+    canvas.addEventListener("touchstart", () => {
+      bullets.push({
+        x: player.x + player.width / 2 - 5,
+        y: player.y,
+        width: 10,
+        height: 20
+      });
+    });
 
-  // player picks powers
-  for(let i=powers.length-1;i>=0;i--){
-    const p = powers[i];
-    if(rectOverlap({x:p.x,y:p.y,w:p.w,h:p.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
-      if(p.type === 'life'){
-        if(player.lives < 3){ player.lives++; updateHUD(); }
-      } else if(p.type === 'double'){
-        if(player.fireLevel < 2) player.fireLevel++;
-      } else if(p.type === 'shield'){
-        player.shieldUntil = Date.now() + 5000; updateHUD();
-      }
-      powers.splice(i,1);
-    }
-  }
-
-  // boss spawn thresholds
-  if(score >= 200 && !bossSpawnedAt200){ spawnBossCount(1); bossSpawnedAt200 = true; }
-  if(score >= 600 && !bossSpawnedAt600){ spawnBossCount(2); bossSpawnedAt600 = true; }
-  if(score >= 1000 && !bossSpawnedAt1000){ spawnBossCount(3); bossSpawnedAt1000 = true; }
-
-  // win condition (post-1000)
-  if(score >= 1000 && bosses.length === 0 && enemies.length === 0){
-    running = false;
-    setTimeout(()=>{ alert('🎉 You defeated final wave! Final Score: '+score); location.reload(); }, 120);
-  }
-}
-
-/* ------------------ DRAW ------------------ */
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  // background (double draw for vertical scroll)
-  if(imgs.bg){
-    const h = canvas.height;
-    const y = (bgY % h);
-    ctx.drawImage(imgs.bg, 0, y - h, canvas.width, h);
-    ctx.drawImage(imgs.bg, 0, y, canvas.width, h);
-  } else {
-    ctx.fillStyle = '#071022'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  }
-
-  // draw powers
-  powers.forEach(p => {
-    if(p.type === 'life') ctx.drawImage(imgs.powerLife, p.x, p.y, p.w, p.h);
-    else if(p.type === 'double') ctx.drawImage(imgs.powerDouble, p.x, p.y, p.w, p.h);
-    else if(p.type === 'shield') ctx.drawImage(imgs.powerShield, p.x, p.y, p.w, p.h);
-  });
-
-  // enemies
-  enemies.forEach(e => {
-    ctx.save(); ctx.globalAlpha = e.fade ? (e.alpha||1) : 1;
-    ctx.drawImage(imgs.enemy, e.x, e.y, e.w, e.h);
-    // optional tiny hit markers (not necessary)
-    ctx.restore();
-  });
-
-  // bosses
-  bosses.forEach(b => {
-    ctx.save(); ctx.globalAlpha = b.fade ? (b.alpha||1) : 1;
-    ctx.drawImage(imgs.boss, b.x, b.y, b.w, b.h);
-    // hp bar (proportional to 40)
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(b.x, b.y-10, b.w, 6);
-    ctx.fillStyle = 'lime'; ctx.fillRect(b.x, b.y-10, b.w * (b.hp / 40), 6);
-    ctx.restore();
-  });
-
-  // player (blink effect)
-  if(player.blinkUntil > Date.now()){
-    if(Math.floor(Date.now()/100) % 2 === 0) ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h);
-  } else {
-    ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h);
-  }
-
-  // draw bullets
-  bulletsP.forEach(b => ctx.drawImage(imgs.bulletP, b.x, b.y, b.w, b.h));
-  bulletsE.forEach(b => {
-    if(b.color === 'green') ctx.drawImage(imgs.bulletP, b.x, b.y, b.w, b.h);
-    else ctx.drawImage(imgs.bulletE, b.x, b.y, b.w, b.h);
-  });
-}
-
-/* ------------------ MAIN LOOP ------------------ */
-function loop(ts){
-  if(!running) return;
-  update(ts);
-  draw();
-  updateHUD();
-  requestAnimationFrame(loop);
-}
-
-/* ------------------ STARTUP ------------------ */
-function startGame(){
-  loadingEl.style.display = 'none';
-  // map loaded imgs references (already in imgs)
-  // set initial sizes
-  positionPlayer();
-  ensurePlayBgm();
-  running = true;
-  lastTime = performance.now();
-  // start periodic spawn / auto-fire timings managed in update
-  requestAnimationFrame(loop);
-}
-
-/* make sure images are in imgs map from earlier loader */
-(function waitForImgs(){
-  if(Object.keys(imgs).length === Object.keys(ASSETS).length){
-    // done
-    startGame();
-  } else {
-    setTimeout(waitForImgs, 120);
-  }
-})();
-
-/* small HUD init */
-updateHUD();
-
-</script>
+    update();
+  </script>
 </body>
-
 </html>
-
-/* me */
