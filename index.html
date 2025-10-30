@@ -42,7 +42,7 @@
     const playerSpeed = 8;
     const bulletSpeed = 9;
     const enemySpeed = 2.5;
-    const bulletFireRate = 600; // ms
+    const bulletFireRate = 1500; // ~1.5 seconds between bullets
     const enemySpawnDelay = 2500; // ms
 
     // --- Handle keyboard ---
@@ -75,11 +75,10 @@
       // --- Player movement ---
       if (keys["ArrowLeft"]) player.x -= playerSpeed;
       if (keys["ArrowRight"]) player.x += playerSpeed;
-
       player.x = Math.max(20, Math.min(canvas.width - 20, player.x));
 
-      // --- Fire bullets ---
-      if (keys[" "] && now - lastFireTime > bulletFireRate) {
+      // --- Auto fire bullets every 1.5 sec ---
+      if (now - lastFireTime > bulletFireRate) {
         bullets.push({ x: player.x, y: player.y - 15 });
         lastFireTime = now;
       }
@@ -116,14 +115,13 @@
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       const h = canvas.height;
 
       // --- Top black bar ---
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, h * 0.1);
 
-      // --- Gameplay area ---
+      // --- Gameplay area (75%) ---
       ctx.fillStyle = "#020b1f";
       ctx.fillRect(0, h * 0.1, canvas.width, h * 0.75);
 
