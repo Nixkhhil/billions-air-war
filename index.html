@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>Aircraft — Final Fixed (Mobile)</title>
+<title>Aircraft — Final</title>
 <style>
   :root{--topbar:10vh;--gameh:75vh;--botbar:15vh}
   *{box-sizing:border-box;margin:0;padding:0}
@@ -15,12 +15,12 @@
   .bottombar{height:var(--botbar);width:100%;background:#000;flex:0 0 var(--botbar)}
   .hud{position:absolute;left:8px;top:8px;z-index:50;color:#fff;font-family:Arial,Helvetica,sans-serif}
   .hud .score{font-weight:700}
-  .hud .hearts img{width:34px;height:34px;margin-left:6px}
+  .hud .hearts img{width:36px;height:36px;margin-left:6px}
   .power-row{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:8px;z-index:50}
-  .power-row img{width:44px;height:44px}
+  .power-row img{width:46px;height:46px}
   #loading{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;z-index:60;font-family:Arial}
-  .popup{position:absolute;left:50%;transform:translateX(-50%);top:20%;color:#fff;font-family:Arial;font-weight:700;pointer-events:none;opacity:0;transition:opacity .3s, transform .3s}
-  @media(max-width:420px){ .hud .hearts img{width:30px;height:30px} .power-row img{width:38px;height:38px} }
+  #popup{position:absolute;left:50%;transform:translateX(-50%);top:18%;color:#fff;font-family:Arial;font-weight:700;pointer-events:none;opacity:0;transition:opacity .25s, transform .25s;z-index:70}
+  @media(max-width:420px){ .hud .hearts img{width:30px;height:30px} .power-row img{width:40px;height:40px} #popup{font-size:14px} }
 </style>
 </head>
 <body>
@@ -39,7 +39,7 @@
 
       <div class="power-row" id="powerRow" style="display:none"></div>
       <div id="loading">Loading assets... 0%</div>
-      <div id="popup" class="popup"></div>
+      <div id="popup"></div>
     </div>
 
     <div class="bottombar"></div>
@@ -48,17 +48,8 @@
   <audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
 
 <script>
-/* FINAL FIXED VERSION
-   - responsive canvas (devicePixelRatio aware)
-   - swipe step + drag in bottom fixed area (horizontal only)
-   - clamped player (never off-screen)
-   - player fire 100ms, enemy fire 500ms, enemy spawn 1000ms
-   - single power on screen every 2000ms, no clustering
-   - boss spawn at 1000 and every +500 -> spawn 2 bosses
-   - popup on power collect
-*/
+/* FINAL mobile-ready single-file game — all specs applied */
 
-/* ---------- CONFIG ---------- */
 const PATHS = {
   bg: './assets/background.png',
   player: './assets/player.png',
@@ -72,47 +63,45 @@ const PATHS = {
   heart: './assets/heart.png'
 };
 
-const PLAYER_FIRE_MS = 100;   // 0.1s
-const ENEMY_FIRE_MS  = 500;   // 0.5s (updated)
-const ENEMY_SPAWN_MS = 1000;  // 1s
-const POWER_SPAWN_MS = 2000;  // 2s
+const PLAYER_FIRE_MS = 100;   // player auto-fire
+const ENEMY_FIRE_MS  = 500;   // enemy bullet interval
+const ENEMY_SPAWN_MS = 800;   // enemy spawn
+const POWER_SPAWN_MS = 2000;  // power spawn
 const SWIPE_STEP = 60;
 const SWIPE_THRESHOLD = 30;
 const POWER_DROP_CHANCE = 0.22;
 
-/* ---------- CANVAS SETUP (DPR aware) ---------- */
 const frame = document.getElementById('frame');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 let DPR = Math.max(1, window.devicePixelRatio || 1);
 
 function fitCanvas(){
-  const rect = frame.getBoundingClientRect();
-  canvas.style.width = rect.width + 'px';
-  canvas.style.height = rect.height + 'px';
-  canvas.width = Math.round(rect.width * DPR);
-  canvas.height = Math.round(rect.height * DPR);
-  ctx.setTransform(DPR,0,0,DPR,0,0); // keep drawing in CSS pixels
+  const r = frame.getBoundingClientRect();
+  canvas.style.width = r.width + 'px';
+  canvas.style.height = r.height + 'px';
+  canvas.width = Math.round(r.width * DPR);
+  canvas.height = Math.round(r.height * DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
 }
 fitCanvas();
 window.addEventListener('resize', ()=>{ fitCanvas(); positionPlayer(); });
 
-/* ---------- LOAD IMAGES ---------- */
+/* load images */
 const imgs = {};
 let toLoad = Object.keys(PATHS).length;
 const loadingEl = document.getElementById('loading');
 for(const [k,p] of Object.entries(PATHS)){
-  const I = new Image();
-  I.src = p;
+  const I = new Image(); I.src = p;
   I.onload = ()=>{ imgs[k]=I; toLoad--; loadingEl.textContent = `Loading assets... ${Math.round(((Object.keys(PATHS).length)-toLoad)/Object.keys(PATHS).length*100)}%`; if(toLoad===0) startGame(); };
   I.onerror = ()=>{ loadingEl.textContent = `Asset load failed: ${p}`; console.error('Asset load error',p); };
 }
 
-/* ---------- AUDIO ---------- */
-const bgm = document.getElementById('bgm'); bgm.volume = 0.35;
+/* audio */
+const bgm = document.getElementById('bgm'); bgm.volume = 0.36;
 function ensurePlayBgm(){ bgm.play().catch(()=>{ document.addEventListener('touchstart', ()=> bgm.play(), {once:true}); }); }
 
-/* ---------- STATE ---------- */
+/* state */
 let running = false;
 let score = 0;
 const scoreEl = document.getElementById('score');
@@ -120,88 +109,77 @@ const heartsDOM = document.getElementById('hearts');
 const powerRow = document.getElementById('powerRow');
 const popupEl = document.getElementById('popup');
 
-const player = { x:0, y:0, w:64, h:64, lives:3, hitCount:0, fireLevel:0, shieldUntil:0 };
+const player = { x:0, y:0, w:72, h:72, lives:3, hitCount:0, fireLevel:0, shieldUntil:0, blinkUntil:0 };
 let bgY = 0;
 
 let enemies = [], bosses = [], bulletsP = [], bulletsE = [], powers = [];
 let lastPlayerShot = 0, lastEnemySpawn = 0, lastPowerSpawn = 0;
-let lastBossSpawnScore = 0;
+let lastBossSpawnScore = null;
 
-/* ---------- HELPERS ---------- */
-const rand = (a,b)=> Math.random()*(b-a)+a;
-const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
-const now = ()=> Date.now();
-const rectOverlap = (A,B)=> A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
+function rand(a,b){ return Math.random()*(b-a)+a; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function now(){ return Date.now(); }
+function rectOverlap(A,B){ return A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y; }
 
 function updateHUD(){
   scoreEl.textContent = score;
   for(let i=0;i<3;i++) heartsDOM.children[i].style.display = (i < player.lives) ? 'inline-block' : 'none';
   powerRow.innerHTML = '';
-  if(player.fireLevel>0){ const el = document.createElement('img'); el.src = PATHS.powerDouble; el.title = player.fireLevel===1 ? '2X Fire' : '3X Fire'; powerRow.appendChild(el); }
-  if(player.shieldUntil > Date.now()){ const el = document.createElement('img'); el.src = PATHS.powerShield; el.title = 'Shield'; powerRow.appendChild(el); }
+  if(player.fireLevel>0){ const el=document.createElement('img'); el.src = PATHS.powerDouble; el.title = player.fireLevel===1 ? '2X Fire' : '3X Fire'; powerRow.appendChild(el); }
+  if(player.shieldUntil > now()){ const el=document.createElement('img'); el.src = PATHS.powerShield; el.title = 'Shield'; powerRow.appendChild(el); }
   powerRow.style.display = powerRow.children.length ? 'flex' : 'none';
 }
 
-/* ---------- SIZING ---------- */
+/* sizing */
 function positionPlayer(){
   const rect = frame.getBoundingClientRect();
-  // player size relative to frame width
-  player.w = Math.round(Math.min(rect.width * 0.14, imgs.player.width || 64));
-  player.h = Math.round(player.w * ((imgs.player.height || player.w) / (imgs.player.width || player.w)));
+  player.w = Math.round(Math.min(rect.width * 0.16, (imgs.player&&imgs.player.width) || 72));
+  player.h = Math.round(player.w * ((imgs.player&&imgs.player.height) ? imgs.player.height / imgs.player.width : 1));
   player.x = clamp((rect.width - player.w) / 2, 6, rect.width - player.w - 6);
   player.y = rect.height - player.h - Math.round(rect.height * 0.06);
 }
-function clampPlayer(){
-  const rect = frame.getBoundingClientRect();
-  player.x = clamp(player.x, 6, rect.width - player.w - 6);
-  player.y = clamp(player.y, 6, rect.height - player.h - 6);
-}
+function clampPlayer(){ const rect = frame.getBoundingClientRect(); player.x = clamp(player.x, 6, rect.width - player.w - 6); }
 
-/* ---------- SPAWN ---------- */
+/* spawners */
 function spawnEnemy(){
   const rect = frame.getBoundingClientRect();
-  const w = Math.round(Math.min(rect.width*0.12, imgs.enemy.width || 48));
-  const h = Math.round(w * ((imgs.enemy.height || w) / (imgs.enemy.width || w)));
-  enemies.push({ x: rand(8, rect.width - w - 8), y: -h - 8, w, h, speed: rand(1.1,1.8), hits:0, fade:false, alpha:1, lastShot: Date.now() + rand(200,600) });
+  const w = Math.round(Math.min(rect.width*0.12, (imgs.enemy&&imgs.enemy.width) || 48));
+  const h = Math.round(w * ((imgs.enemy&&imgs.enemy.height) ? imgs.enemy.height / imgs.enemy.width : 1));
+  enemies.push({ x: rand(8, rect.width - w - 8), y: -h - 8, w, h, speed: rand(1.1,1.8), hits:0, hp:3, fade:false, alpha:1, lastShot: now() + rand(200,600) });
 }
 
 function spawnPowerRandom(){
   const rect = frame.getBoundingClientRect();
-  if(powers.length > 0) return; // only 1 power at a time
-  const w = Math.round(Math.min(rect.width*0.09, imgs.powerDouble.width || 48));
-  const h = Math.round(w * ((imgs.powerDouble.height || w) / (imgs.powerDouble.width || w)));
-  // pick a position inside playable area away from edges
+  if(powers.length > 0) return; // only one power at a time
+  const w = Math.round(Math.min(rect.width*0.10, (imgs.powerDouble&&imgs.powerDouble.width) || 48));
+  const h = Math.round(w * ((imgs.powerDouble&&imgs.powerDouble.height) ? imgs.powerDouble.height / imgs.powerDouble.width : 1));
   const px = rand(30, rect.width - 30 - w);
-  const py = rand(30, rect.height - 130 - h); // stay above bottom controls
+  const py = rand(30, rect.height - 150 - h);
   const types = ['life','double','shield'];
   const t = types[Math.floor(Math.random()*types.length)];
   powers.push({ x: px, y: py, w, h, type: t, vy: 0.6 });
 }
 
-/* ---------- BOSS SPAWN RULE ----------
- At 1000 -> spawn 2 bosses. After that every +500 -> spawn 2 bosses.
-*/
 function spawnBossPair(){
   const rect = frame.getBoundingClientRect();
-  const w = Math.round(Math.min(rect.width*0.28, imgs.boss.width || 200));
-  const h = Math.round(w * ((imgs.boss.height || w) / (imgs.boss.width || w)));
-  // two bosses: left and right
-  bosses.push({ x: 40, y: -h - 10, w, h, vx: 1.2, hp: 40, fade:false, alpha:1, fireTimer:0 });
-  bosses.push({ x: rect.width - 40 - w, y: -h - 10, w, h, vx: -1.2, hp: 40, fade:false, alpha:1, fireTimer:0 });
+  const w = Math.round(Math.min(rect.width*0.32, (imgs.boss&&imgs.boss.width) || 200));
+  const h = Math.round(w * ((imgs.boss&&imgs.boss.height) ? imgs.boss.height / imgs.boss.width : 1));
+  bosses.push({ x: 40, y: -h - 10, w, h, vx:1.2, hp:40, fade:false, alpha:1, fireTimer:0 });
+  bosses.push({ x: rect.width - 40 - w, y: -h - 10, w, h, vx:-1.2, hp:40, fade:false, alpha:1, fireTimer:0 });
 }
 
-/* ---------- FIRE ---------- */
+/* firing */
 function playerShoot(){
-  const bw = Math.round(player.w*0.14), bh = Math.round(player.h*0.28);
+  const bw = Math.round(player.w*0.16), bh = Math.round(player.h*0.28);
   if(player.fireLevel === 0){
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
+    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
   } else if(player.fireLevel === 1){
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
+    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
+    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
   } else {
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 30 });
+    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
+    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
+    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 36 });
   }
 }
 
@@ -214,21 +192,20 @@ function bossFire3(b){
   const bw = Math.round(b.w*0.14), bh = Math.round(b.h*0.28);
   const lanes = [ b.x + 8, b.x + b.w/2 - bw/2, b.x + b.w - bw - 8 ];
   for(let i=0;i<3;i++){
-    const lx = clamp(lanes[i], 6, (frame.getBoundingClientRect().width) - bw - 6);
+    const lx = clamp(lanes[i], 6, frame.getBoundingClientRect().width - bw - 6);
     bulletsE.push({ x: lx, y: b.y + b.h + 6, w: bw, h: bh, spd: 6, color:'green' });
   }
 }
 
-/* ---------- UPDATE & COLLISIONS ---------- */
+/* update */
 let lastFrame = performance.now();
 function update(ts){
   const dt = Math.max(1, ts - lastFrame);
   lastFrame = ts;
-
   const rect = frame.getBoundingClientRect();
 
   // background scroll
-  bgY += 1.2 * (dt/16); if(bgY >= rect.height) bgY = 0;
+  bgY += 1.6 * (dt/16); if(bgY >= rect.height) bgY = 0;
 
   // auto player fire
   if(now() - lastPlayerShot > PLAYER_FIRE_MS){ lastPlayerShot = now(); playerShoot(); }
@@ -236,10 +213,10 @@ function update(ts){
   // spawn enemies
   if(now() - lastEnemySpawn > ENEMY_SPAWN_MS){ lastEnemySpawn = now(); spawnEnemy(); }
 
-  // periodic power spawn (ensure only 1 power)
+  // spawn power periodically
   if(now() - lastPowerSpawn > POWER_SPAWN_MS){ lastPowerSpawn = now(); spawnPowerRandom(); }
 
-  // update enemies and enemy shooting
+  // update enemies & enemy shooting
   for(let i=enemies.length-1;i>=0;i--){
     const e = enemies[i];
     e.y += e.speed * (dt/16);
@@ -252,7 +229,6 @@ function update(ts){
     const b = bosses[i];
     b.x += b.vx * (dt/16);
     if(b.x < 6 || b.x + b.w > rect.width - 6) b.vx *= -1;
-    // occasional 3-lane bursts (controlled by probability)
     if(Math.random() < 0.008) bossFire3(b);
   }
 
@@ -260,24 +236,27 @@ function update(ts){
   for(let i=bulletsP.length-1;i>=0;i--){ bulletsP[i].y -= bulletsP[i].spd * (dt/16); if(bulletsP[i].y < -120) bulletsP.splice(i,1); }
   for(let i=bulletsE.length-1;i>=0;i--){ bulletsE[i].y += bulletsE[i].spd * (dt/16); if(bulletsE[i].y > rect.height + 200) bulletsE.splice(i,1); }
 
-  // update powers (they fall slowly)
+  // update powers
   for(let i=powers.length-1;i>=0;i--){ powers[i].y += powers[i].vy * (dt/16); if(powers[i].y > rect.height + 80) powers.splice(i,1); }
 
-  // collisions: player bullets -> enemies (3 hits to die)
+  // player bullets -> enemies (enemy HP = 3)
   for(let i=bulletsP.length-1;i>=0;i--){
     const pb = bulletsP[i];
+    let hit = false;
     // enemies
     for(let j=enemies.length-1;j>=0;j--){
       const e = enemies[j];
       if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:e.x,y:e.y,w:e.w,h:e.h})){
         bulletsP.splice(i,1);
-        e.hits = (e.hits||0) + 1;
+        e.hp = (e.hp||3) - 1;
         e.alpha = 1;
-        if(e.hits >= 3){ e.fade = true; e.alpha = 1; if(Math.random() < POWER_DROP_CHANCE) spawnPowerRandom(); score += 10; updateHUD(); }
+        if(e.hp <= 0){ e.fade = true; e.alpha = 1; score += 10; updateHUD(); if(Math.random() < POWER_DROP_CHANCE) spawnPowerRandom(); }
+        hit = true;
         break;
       }
     }
-    // bosses (1 hp per hit)
+    if(hit) continue;
+    // bosses
     for(let bi=bosses.length-1;bi>=0;bi--){
       const bo = bosses[bi];
       if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:bo.x,y:bo.y,w:bo.w,h:bo.h})){
@@ -291,31 +270,23 @@ function update(ts){
     }
   }
 
-  // remove faded enemies & bosses
+  // fade removal for enemies & bosses
   for(let i=enemies.length-1;i>=0;i--){ if(enemies[i].fade){ enemies[i].alpha -= 0.06 * (dt/16); if(enemies[i].alpha <= 0) enemies.splice(i,1); } }
   for(let i=bosses.length-1;i>=0;i--){ if(bosses[i].fade){ bosses[i].alpha -= 0.03 * (dt/16); if(bosses[i].alpha <= 0){ bosses.splice(i,1); score += 100; updateHUD(); } } }
 
-  // enemy bullets -> player: 3 hits to reduce one life
+  // enemy bullets -> player (3 hits to lose a life)
   for(let i=bulletsE.length-1;i>=0;i--){
     const eb = bulletsE[i];
     if(rectOverlap({x:eb.x,y:eb.y,w:eb.w,h:eb.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
       bulletsE.splice(i,1);
-      if(player.shieldUntil > Date.now()){
-        // shield protects
-      } else {
-        player.hitCount = (player.hitCount||0) + 1;
-        // blink effect triggered by setting blinkUntil (handled in draw)
-        player.blinkUntil = now() + 800;
-        if(player.hitCount >= 3){
-          player.hitCount = 0;
-          player.lives = Math.max(0, player.lives - 1);
-          updateHUD();
-          if(player.lives <= 0){
-            running = false;
-            setTimeout(()=>{ alert('Game Over! Score: ' + score); location.reload(); }, 60);
-            return;
-          }
-        }
+      if(player.shieldUntil > now()){ continue; }
+      player.hitCount = (player.hitCount||0) + 1;
+      player.blinkUntil = now() + 800;
+      if(player.hitCount >= 3){
+        player.hitCount = 0;
+        player.lives = Math.max(0, player.lives - 1);
+        updateHUD();
+        if(player.lives <= 0){ running = false; setTimeout(()=>{ alert('Game Over! Score: '+score); location.reload(); },80); return; }
       }
     }
   }
@@ -324,73 +295,49 @@ function update(ts){
   for(let i=powers.length-1;i>=0;i--){
     const p = powers[i];
     if(rectOverlap({x:p.x,y:p.y,w:p.w,h:p.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
-      // apply
-      if(p.type === 'life'){
-        player.lives = Math.min(3, player.lives + 1);
-        showPopup('Life +1');
-      } else if(p.type === 'double'){
-        player.fireLevel = Math.min(2, player.fireLevel + 1);
-        showPopup(player.fireLevel === 1 ? '2X Fire' : '3X Fire');
-      } else if(p.type === 'shield'){
-        player.shieldUntil = Date.now() + 5000;
-        showPopup('Shield Activated');
-      }
+      if(p.type === 'life'){ player.lives = Math.min(3, player.lives + 1); showPopup('Life +1'); }
+      else if(p.type === 'double'){ player.fireLevel = Math.min(2, player.fireLevel + 1); showPopup(player.fireLevel === 1 ? '2X Fire' : '3X Fire'); }
+      else if(p.type === 'shield'){ player.shieldUntil = now() + 5000; showPopup('Shield'); }
       powers.splice(i,1);
       updateHUD();
     }
   }
 
-  // boss spawn rule: at 1000 -> spawn 2 bosses; afterwards every +500 -> spawn 2 bosses
-  if(score >= 1000 && (lastBossSpawnScore === undefined || score - (lastBossSpawnScore||0) >= 500)){
-    if(lastBossSpawnScore === undefined || score === 1000 || score - (lastBossSpawnScore||0) >= 500){
-      spawnBossPairIfAllowed();
-      lastBossSpawnScore = score;
+  // boss spawn: at 1000 -> 2 bosses. after that every +500 -> spawn 2 bosses
+  if(score >= 1000){
+    if(lastBossSpawnScore === null){
+      spawnBossPair(); lastBossSpawnScore = 1000;
+    } else if(score - lastBossSpawnScore >= 500){
+      spawnBossPair(); lastBossSpawnScore = score;
     }
   }
 
-  // victory check (optional)
-  if(score >= 1000 && bosses.length === 0 && enemies.length === 0 && powers.length === 0){
-    // keep playing — per your rule bosses keep coming every +500; but if you want a win state add here
-  }
+  // victory not enforced — game continues with boss waves
 }
 
-/* spawn pair helper with limit */
-function spawnBossPairIfAllowed(){
-  // spawn 2 bosses
-  spawnBossPair();
-}
-
-/* ---------- DRAW ---------- */
+/* draw */
 function draw(){
-  // clear using CSS pixels (ctx has DPR transform)
   const rect = frame.getBoundingClientRect();
   ctx.clearRect(0,0,rect.width,rect.height);
 
-  // background (tiled vertical)
-  if(imgs.bg){
-    const h = rect.height;
-    const y = (bgY % h);
-    ctx.drawImage(imgs.bg, 0, y - h, rect.width, h);
-    ctx.drawImage(imgs.bg, 0, y, rect.width, h);
-  } else {
-    ctx.fillStyle = '#071022'; ctx.fillRect(0,0,rect.width,rect.height);
-  }
+  // background
+  if(imgs.bg){ const h = rect.height; const y = (bgY % h); ctx.drawImage(imgs.bg,0,y-h,rect.width,h); ctx.drawImage(imgs.bg,0,y,rect.width,h); }
+  else { ctx.fillStyle='#071022'; ctx.fillRect(0,0,rect.width,rect.height); }
 
-  // draw powers
+  // powers
   powers.forEach(p => {
     const img = (p.type==='life') ? imgs.powerLife : (p.type==='double') ? imgs.powerDouble : imgs.powerShield;
     ctx.drawImage(img, p.x, p.y, p.w, p.h);
   });
 
-  // draw enemies (with fade)
+  // enemies
   enemies.forEach(e => { ctx.save(); ctx.globalAlpha = e.fade ? (e.alpha||1) : 1; ctx.drawImage(imgs.enemy, e.x, e.y, e.w, e.h); ctx.restore(); });
 
-  // draw bosses (with HP bar)
+  // bosses
   bosses.forEach(b => {
-    ctx.save(); ctx.globalAlpha = b.fade ? (b.alpha||1) : 1;
-    ctx.drawImage(imgs.boss, b.x, b.y, b.w, b.h);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(b.x, b.y - 10, b.w, 6);
-    ctx.fillStyle = 'lime'; ctx.fillRect(b.x, b.y - 10, b.w * (b.hp / 40), 6);
+    ctx.save(); ctx.globalAlpha = b.fade ? (b.alpha||1) : 1; ctx.drawImage(imgs.boss, b.x, b.y, b.w, b.h);
+    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(b.x, b.y-10, b.w, 6);
+    ctx.fillStyle='lime'; ctx.fillRect(b.x, b.y-10, b.w * (b.hp / 40), 6);
     ctx.restore();
   });
 
@@ -401,7 +348,7 @@ function draw(){
     ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h);
   }
 
-  // draw bullets
+  // bullets
   bulletsP.forEach(b => ctx.drawImage(imgs.bulletP, b.x, b.y, b.w, b.h));
   bulletsE.forEach(b => {
     const img = (b.color === 'green') ? imgs.bulletP : imgs.bulletE;
@@ -409,7 +356,7 @@ function draw(){
   });
 }
 
-/* ---------- MAIN LOOP ---------- */
+/* loop */
 function loop(ts){
   if(!running) return;
   update(ts);
@@ -418,78 +365,59 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
-/* ---------- INPUT: SWIPE (step) and DRAG in bottom region ---------- */
+/* input: swipe (step) + drag (bottom 25%) */
 let touchStartX = null, touchStartTime = 0;
-let dragging = false;
-let lastTouchX = null;
-const DRAG_AREA_HEIGHT_RATIO = 0.25; // bottom 25% is drag area
+let dragging = false, lastTouchX = null;
+const DRAG_AREA_RATIO = 0.25;
 
 canvas.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   touchStartX = t.clientX;
-  touchStartTime = Date.now();
+  touchStartTime = now();
   lastTouchX = t.clientX;
-  // decide if touch is in bottom drag area
   const rect = frame.getBoundingClientRect();
   const localY = t.clientY - rect.top;
-  dragging = localY > rect.height * (1 - DRAG_AREA_HEIGHT_RATIO);
+  dragging = localY > rect.height * (1 - DRAG_AREA_RATIO);
   ensurePlayBgm();
 }, {passive:true});
 
 canvas.addEventListener('touchmove', (e) => {
-  if(!dragging) return; // only follow if in drag area
+  if(!dragging) return;
   e.preventDefault();
   const t = e.touches[0];
   const dx = t.clientX - lastTouchX;
-  // apply small scale so player moves naturally
-  player.x += dx;
+  // make drag faster: amplify slightly
+  player.x += dx * 1.6;
   clampPlayer();
   lastTouchX = t.clientX;
 }, {passive:false});
 
 canvas.addEventListener('touchend', (e) => {
-  // If it was a swipe (quick horizontal delta) and NOT a dragging move, treat as step
   if(!dragging && touchStartX !== null){
     const touch = (e.changedTouches && e.changedTouches[0]) || null;
     if(touch){
       const dx = touch.clientX - touchStartX;
-      const dt = Date.now() - touchStartTime;
+      const dt = now() - touchStartTime;
       if(Math.abs(dx) > SWIPE_THRESHOLD && dt < 700){
         if(dx > 0) player.x += SWIPE_STEP; else player.x -= SWIPE_STEP;
         clampPlayer();
       } else {
-        // small tap -> manual extra shot
-        playerShoot();
+        playerShoot(); // tap = extra shot
       }
     }
   }
-  // reset
   touchStartX = null; touchStartTime = 0; dragging = false; lastTouchX = null;
 }, {passive:true});
 
-/* ---------- TIMERS: Auto firing & enemy shots & spawners (using setInterval safe) ---------- */
-setInterval(()=>{ if(running) { /* nothing here – player fire controlled by lastPlayerShot timer inside update loop */ } }, 100);
-
-setInterval(()=>{ // enemy automatic fire per enemy (but controlled individually inside update by lastShot)
-  // nothing - handled in update by per-enemy lastShot using ENEMY_FIRE_MS
-}, 200);
-
-setInterval(()=>{ // guarantee power spawn check (spawnPowerRandom checks only-one rule)
-  if(!running) return;
-  if(now() - lastPowerSpawn > POWER_SPAWN_MS) { lastPowerSpawn = now(); spawnPowerRandom(); }
-}, 500);
-
-/* ---------- POPUP ---------- */
-let popupTimer = null;
+/* timers/intervals */
 function showPopup(text){
   popupEl.style.opacity = '1';
   popupEl.style.transform = 'translateX(-50%) translateY(0)';
   popupEl.textContent = text;
-  if(popupTimer) clearTimeout(popupTimer);
-  popupTimer = setTimeout(()=>{ popupEl.style.opacity = '0'; popupEl.style.transform = 'translateX(-50%) translateY(-10px)'; }, 1400);
+  setTimeout(()=>{ popupEl.style.opacity = '0'; popupEl.style.transform = 'translateX(-50%) translateY(-10px)'; }, 1400);
 }
 
-/* ---------- START / INIT ---------- */
+/* start */
 function startGame(){
   loadingEl.style.display = 'none';
   fitCanvas();
@@ -499,22 +427,22 @@ function startGame(){
   lastPlayerShot = now();
   lastEnemySpawn = now();
   lastPowerSpawn = now();
-  // set intervals for enemy spawn and consistent enemy fire control
-  setInterval(()=>{ if(running) { spawnEnemy(); } }, ENEMY_SPAWN_MS);
-  // auto-run loop
+
+  // consistent spawn interval using setInterval
+  setInterval(()=>{ if(running) spawnEnemy(); }, ENEMY_SPAWN_MS);
+  // periodic power spawn checker
+  setInterval(()=>{ if(!running) return; if(now() - lastPowerSpawn > POWER_SPAWN_MS){ lastPowerSpawn = now(); spawnPowerRandom(); } }, 500);
+
   requestAnimationFrame(loop);
 }
 
-/* ---------- WAIT FOR IMAGES ---------- */
+/* wait for images loaded */
 (function waitReady(){
-  if(Object.keys(imgs).length === Object.keys(PATHS).length) {
-    // everything loaded
-    // small tweak: if any images are zero-size, still set player default
+  if(Object.keys(imgs).length === Object.keys(PATHS).length){
     positionPlayer();
     startGame();
   } else setTimeout(waitReady, 120);
 })();
-
 </script>
 </body>
 </html>
