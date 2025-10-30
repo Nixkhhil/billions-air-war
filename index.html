@@ -47,8 +47,7 @@
   <audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
 
 <script>
-/* FINAL mobile-only swipe-only game */
-/* ---------- CONFIG ---------- */
+/* FINAL mobile-only swipe-only game — Player fire very fast, enemy spawn 1s, enemy fire 2s */
 const PATHS = {
   bg: './assets/background.png',
   player: './assets/player.png',
@@ -62,42 +61,33 @@ const PATHS = {
   heart: './assets/heart.png'
 };
 
-const PLAYER_FIRE_MS = 100;     // your bullets: nonstop every ~100 ms (very fast)
-const ENEMY_FIRE_MS = 1000;     // enemy shoots ~1 per second
-const ENEMY_SPAWN_MS = 3500;    // enemy spawn (slightly slower)
-const SWIPE_STEP = 60;          // px per swipe
-const SWIPE_THRESHOLD = 30;     // min swipe dx to be considered
+const PLAYER_FIRE_MS = 50;    // player's nonstop fire: 50 ms
+const ENEMY_FIRE_MS   = 2000; // enemy shoots ~1 shot every 2 seconds
+const ENEMY_SPAWN_MS  = 1000; // spawn 1 enemy per second
+const SWIPE_STEP      = 60;   // px per swipe
+const SWIPE_THRESHOLD = 30;   // min px to consider swipe
+const POWER_DROP_CHANCE = 0.22;
 
-/* ---------- CANVAS & FRAME ---------- */
 const frame = document.getElementById('frame');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
-function fitCanvas(){
-  const r = frame.getBoundingClientRect();
-  canvas.width = Math.round(r.width);
-  canvas.height = Math.round(r.height);
-}
+function fitCanvas(){ const r = frame.getBoundingClientRect(); canvas.width = Math.round(r.width); canvas.height = Math.round(r.height); }
 fitCanvas();
 window.addEventListener('resize', ()=>{ fitCanvas(); positionPlayer(); });
 
-/* ---------- LOAD IMAGES ---------- */
 const imgs = {};
 let toLoad = Object.keys(PATHS).length;
 const loadingEl = document.getElementById('loading');
-
 for(const [k,p] of Object.entries(PATHS)){
-  const I = new Image();
-  I.src = p;
+  const I = new Image(); I.src = p;
   I.onload = ()=>{ imgs[k]=I; toLoad--; loadingEl.textContent = `Loading assets... ${Math.round(((Object.keys(PATHS).length)-toLoad)/Object.keys(PATHS).length*100)}%`; if(toLoad===0) init(); };
   I.onerror = ()=>{ loadingEl.textContent = `Asset load failed: ${p}`; console.error('Asset load error',p); };
 }
 
-/* ---------- AUDIO ---------- */
 const bgm = document.getElementById('bgm'); bgm.volume = 0.36;
 function ensurePlayBgm(){ bgm.play().catch(()=>{ document.addEventListener('touchstart', ()=> bgm.play(), {once:true}); }); }
 
-/* ---------- STATE ---------- */
 let running = false;
 let score = 0;
 const scoreEl = document.getElementById('score');
@@ -106,22 +96,15 @@ const powerRow = document.getElementById('powerRow');
 
 const player = { x:0, y:0, w:96, h:96, speed:7, lives:3, blinkUntil:0, shieldUntil:0, fireLevel:0 };
 let bgY = 0;
-
 let enemies = [], bosses = [], bulletsP = [], bulletsE = [], powers = [];
-
 let lastPlayerShot = 0;
 let lastEnemySpawn = 0;
-
-/* boss spawn flags */
 let s200=false, s600=false, s1000=false;
 
-/* ---------- HELPERS ---------- */
 const rand = (a,b)=> Math.random()*(b-a)+a;
 const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
-const now = ()=> performance.now();
 const rectOverlap = (A,B)=> A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
 
-/* ---------- HUD ---------- */
 function updateHUD(){
   scoreEl.textContent = score;
   for(let i=0;i<3;i++) heartsDOM.children[i].style.display = (i < player.lives) ? 'inline-block' : 'none';
@@ -131,7 +114,6 @@ function updateHUD(){
   powerRow.style.display = powerRow.children.length ? 'flex' : 'none';
 }
 
-/* ---------- SIZING ---------- */
 function positionPlayer(){
   fitCanvas();
   player.w = Math.round(Math.min(canvas.width*0.14, imgs.player.width));
@@ -142,7 +124,6 @@ function positionPlayer(){
 }
 function clampPlayer(){ player.x = clamp(player.x, 6, canvas.width - player.w - 6); player.y = clamp(player.y, 6, canvas.height - player.h - 6); }
 
-/* ---------- SPAWN ---------- */
 function spawnEnemy(){
   const w = Math.round(Math.min(canvas.width*0.12, imgs.enemy.width));
   const h = Math.round(w * (imgs.enemy.height / imgs.enemy.width));
@@ -164,18 +145,17 @@ function spawnBossCount(n){
   if(n===3){ bosses.push({x:40,y:30,w,h,vx:1.2,hp:40,fade:false,alpha:1}); bosses.push({x:(canvas.width-w)/2,y:20,w,h,vx:0.8,hp:40,fade:false,alpha:1}); bosses.push({x:canvas.width-40-w,y:30,w,h,vx:-1.2,hp:40,fade:false,alpha:1}); }
 }
 
-/* ---------- FIRE ---------- */
 function playerShoot(){
   const bw = Math.round(player.w*0.14), bh = Math.round(player.h*0.28);
   if(player.fireLevel===0){
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
+    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
   } else if(player.fireLevel===1){
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
+    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
+    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
   } else {
-    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
-    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
-    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 20 });
+    bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
+    bulletsP.push({ x: player.x + 6, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
+    bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 28 });
   }
 }
 function enemyFire(e){
@@ -188,34 +168,33 @@ function bossFire(b){
   for(let i=0;i<4;i++){ const lx = clamp(lanes[i],6,canvas.width-bw-6); bulletsE.push({ x: lx, y: b.y + b.h + 6, w: bw, h: bh, spd: 6, color:'green' }); }
 }
 
-/* ---------- UPDATE ---------- */
 let lastFrame = performance.now();
 function update(ts){
   const dt = Math.max(1, ts - lastFrame);
   lastFrame = ts;
 
-  // bg scroll
+  // background scroll
   bgY += 1.6 * (dt/16); if(bgY >= canvas.height) bgY = 0;
 
-  // player auto-fire (very fast)
+  // player auto-fire (very fast 50 ms)
   if(Date.now() - lastPlayerShot > PLAYER_FIRE_MS){ lastPlayerShot = Date.now(); playerShoot(); }
 
-  // spawn enemies occasionally (slower)
+  // spawn enemies every 1s
   if(Date.now() - lastEnemySpawn > ENEMY_SPAWN_MS){
     lastEnemySpawn = Date.now();
-    if(Math.random() < 0.9) spawnEnemy();
+    if(Math.random() < 0.95) spawnEnemy();
     if(Math.random() < 0.08) spawnPower(rand(40, canvas.width-80), -40);
   }
 
-  // update enemies & per-enemy shooting (avg 1/sec)
+  // update enemies & per-enemy shooting (avg 1 shot per 2s)
   for(let i=enemies.length-1;i>=0;i--){
     const e = enemies[i];
     e.y += e.speed * (dt/16);
-    if(Date.now() - e.lastShot > ENEMY_FIRE_MS + Math.random()*200) { e.lastShot = Date.now(); enemyFire(e); }
+    if(Date.now() - e.lastShot > ENEMY_FIRE_MS + Math.random()*400){ e.lastShot = Date.now(); enemyFire(e); }
     if(e.y > canvas.height + 60) enemies.splice(i,1);
   }
 
-  // update bosses movement + occasional fire
+  // update bosses
   for(let i=bosses.length-1;i>=0;i--){
     const b = bosses[i];
     b.x += b.vx * (dt/16);
@@ -223,7 +202,7 @@ function update(ts){
     if(Math.random() < 0.006) bossFire(b);
   }
 
-  // bullets update (player bullets very fast)
+  // bullets update
   for(let i=bulletsP.length-1;i>=0;i--){ bulletsP[i].y -= bulletsP[i].spd * (dt/16); if(bulletsP[i].y < -80) bulletsP.splice(i,1); }
   for(let i=bulletsE.length-1;i>=0;i--){ bulletsE[i].y += bulletsE[i].spd * (dt/16); if(bulletsE[i].y > canvas.height + 200) bulletsE.splice(i,1); }
 
@@ -239,11 +218,11 @@ function update(ts){
         bulletsP.splice(i,1);
         e.hits++;
         e.alpha = 1;
-        if(e.hits >= 3){ e.fade = true; e.alpha=1; if(Math.random() < 0.22) spawnPower(e.x, e.y); score += 10; updateHUD(); }
+        if(e.hits >= 3){ e.fade = true; e.alpha=1; if(Math.random() < POWER_DROP_CHANCE) spawnPower(e.x, e.y); score += 10; updateHUD(); }
         break;
       }
     }
-    // bosses (each bullet = 1 hp)
+    // bosses
     for(let bi=bosses.length-1;bi>=0;bi--){
       const bo = bosses[bi];
       if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:bo.x,y:bo.y,w:bo.w,h:bo.h})){
@@ -252,7 +231,7 @@ function update(ts){
     }
   }
 
-  // fade removal enemies & bosses
+  // fade removal
   for(let i=enemies.length-1;i>=0;i--){ if(enemies[i].fade){ enemies[i].alpha -= 0.06 * (dt/16); if(enemies[i].alpha <= 0) enemies.splice(i,1); } }
   for(let i=bosses.length-1;i>=0;i--){ if(bosses[i].fade){ bosses[i].alpha -= 0.03 * (dt/16); if(bosses[i].alpha <= 0){ bosses.splice(i,1); score += 100; updateHUD(); } } }
 
@@ -285,7 +264,6 @@ function update(ts){
   if(score >= 1000 && bosses.length===0 && enemies.length===0){ running=false; setTimeout(()=>{ alert('You Win! Score: '+score); location.reload(); },120); return; }
 }
 
-/* ---------- DRAW ---------- */
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
@@ -314,7 +292,6 @@ function draw(){
   bulletsE.forEach(b => { if(b.color==='green') ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h); else ctx.drawImage(imgs.bulletE,b.x,b.y,b.w,b.h); });
 }
 
-/* ---------- MAIN LOOP ---------- */
 function loop(ts){
   if(!running) return;
   update(ts);
@@ -323,7 +300,7 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
-/* ---------- SWIPE (NO DRAG) ---------- */
+/* SWIPE ONLY (no drag) */
 let touchStartX = null, touchStartTime = 0;
 canvas.addEventListener('touchstart', e => {
   const t = e.touches[0];
@@ -342,13 +319,12 @@ canvas.addEventListener('touchend', e => {
     if(dx > 0) player.x += SWIPE_STEP; else player.x -= SWIPE_STEP;
     clampPlayer();
   } else {
-    // short tap = manual quick extra shot
+    // tap = extra manual shot
     playerShoot();
   }
   touchStartX = null;
 }, {passive:true});
 
-/* ---------- START ---------- */
 function init(){
   loadingEl.style.display = 'none';
   positionPlayer();
@@ -357,12 +333,9 @@ function init(){
   lastPlayerShot = Date.now();
   lastEnemySpawn = Date.now();
   requestAnimationFrame(loop);
-
-  // periodic power spawner to avoid clustering
   setInterval(()=>{ if(Math.random() < 0.22) spawnPower(rand(40, canvas.width-80), -40); }, 9000);
 }
 
-/* ---------- WAIT & START ---------- */
 (function waitReady(){ if(Object.keys(imgs).length === Object.keys(PATHS).length) init(); else setTimeout(waitReady,120); })();
 
 </script>
