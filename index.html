@@ -3,18 +3,17 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Aircraft - Mobile (Swipe)</title>
+<title>Aircraft — Swipe Control (Mobile)</title>
 <style>
   :root{--topbar:10vh;--gameh:75vh;--botbar:15vh}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:#000;touch-action:none;-webkit-user-select:none;user-select:none}
-  /* layout: top black, centered gameplay canvas, bottom black */
   .wrap{width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
-  .topbar{height:var(--topbar);width:100%;background:#000;flex:0 0 var(--topbar)} 
+  .topbar{height:var(--topbar);width:100%;background:#000;flex:0 0 var(--topbar)}
   .frame{width:100%;height:var(--gameh);max-width:900px;position:relative;overflow:hidden;background:#000;flex:0 0 var(--gameh)}
   canvas{display:block;width:100%;height:100%}
   .bottombar{height:var(--botbar);width:100%;background:#000;flex:0 0 var(--botbar)}
-  /* HUD overlay inside frame */
+  /* HUD */
   .hud{position:absolute;left:8px;top:8px;z-index:50;color:#fff;font-family:Arial,Helvetica,sans-serif}
   .hud .score{font-weight:700}
   .hud .hearts img{width:34px;height:34px;margin-left:6px}
@@ -25,32 +24,32 @@
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="topbar"></div>
+  <div class="wrap">
+    <div class="topbar"></div>
 
-  <div class="frame" id="frame">
-    <canvas id="canvas"></canvas>
+    <div class="frame" id="frame">
+      <canvas id="canvas"></canvas>
 
-    <div class="hud" id="hud">
-      <div class="score">Score: <span id="score">0</span></div>
-      <div class="hearts" id="hearts">
-        <img src="./assets/heart.png" alt="h"><img src="./assets/heart.png" alt="h"><img src="./assets/heart.png" alt="h">
+      <div class="hud" id="hud">
+        <div class="score">Score: <span id="score">0</span></div>
+        <div class="hearts" id="hearts">
+          <img src="./assets/heart.png" alt="h"><img src="./assets/heart.png" alt="h"><img src="./assets/heart.png" alt="h">
+        </div>
       </div>
+
+      <div class="power-row" id="powerRow" style="display:none"></div>
+      <div id="loading">Loading assets... 0%</div>
     </div>
 
-    <div class="power-row" id="powerRow" style="display:none"></div>
-    <div id="loading">Loading assets... 0%</div>
+    <div class="bottombar"></div>
   </div>
 
-  <div class="bottombar"></div>
-</div>
-
-<audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
+  <audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
 
 <script>
-/* Final mobile-only game (swipe controls, no buttons) */
-/* ---------- CONFIG ---------- */
-const ASSET = {
+/* FINAL mobile-only swipe control game (single-file) */
+/* ---------- CONFIG (you can tweak) ---------- */
+const PATHS = {
   bg: './assets/background.png',
   player: './assets/player.png',
   enemy: './assets/enemy.png',
@@ -62,32 +61,29 @@ const ASSET = {
   powerLife: './assets/power_extra_life.png',
   heart: './assets/heart.png'
 };
-const AUTO_FIRE_MS = 1200;      // ~1.2s between auto shots (you wanted ~1.5s; this is slightly faster)
-const ENEMY_SPAWN_MS = 3000;    // spawn enemies every ~3s (balanced)
-const ENEMY_SHOT_MIN_MS = 1400; // enemy will shoot not faster than this on average
-const POWER_SPAWN_CHANCE = 0.22; // chance to drop power on enemy death
+const AUTO_FIRE_MS = 1500;     // auto-fire ~1.5s
+const ENEMY_SPAWN_MS = 3000;   // enemy spawn every ~3s
+const ENEMY_SHOT_MIN_MS = 1500;// enemy shot latency (>= this)
+const POWER_DROP_CHANCE = 0.22;
+const SWIPE_STEP = 60;         // px moved per swipe
+const SWIPE_THRESHOLD = 30;    // min px to consider swipe
 
-/* ---------- CANVAS & FRAME ---------- */
+/* ---------- CANVAS ---------- */
 const frame = document.getElementById('frame');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-function fitCanvas(){
-  const rect = frame.getBoundingClientRect();
-  canvas.width = Math.round(rect.width);
-  canvas.height = Math.round(rect.height);
-}
+function fitCanvas(){ const r = frame.getBoundingClientRect(); canvas.width = Math.round(r.width); canvas.height = Math.round(r.height); }
 fitCanvas();
-window.addEventListener('resize', () => { fitCanvas(); positionPlayer(); });
+window.addEventListener('resize', ()=>{ fitCanvas(); positionPlayer(); });
 
 /* ---------- LOAD IMAGES ---------- */
 const imgs = {};
-let remaining = Object.keys(ASSET).length;
+let toLoad = Object.keys(PATHS).length;
 const loadingEl = document.getElementById('loading');
-for (const [k,p] of Object.entries(ASSET)){
-  const img = new Image();
-  img.src = p;
-  img.onload = ()=>{ imgs[k]=img; remaining--; loadingEl.textContent = `Loading assets... ${Math.round((Object.keys(ASSET).length-remaining)/Object.keys(ASSET).length*100)}%`; if(remaining===0) init(); };
-  img.onerror = ()=>{ loadingEl.textContent = `Asset load failed: ${p}`; console.error('Asset load error',p); };
+for(const [k,p] of Object.entries(PATHS)){
+  const I = new Image(); I.src = p;
+  I.onload = ()=>{ imgs[k]=I; toLoad--; loadingEl.textContent = `Loading assets... ${Math.round((Object.keys(PATHS).length-toLoad)/Object.keys(PATHS).length*100)}%`; if(toLoad===0) start(); };
+  I.onerror = ()=>{ loadingEl.textContent = `Asset load failed: ${p}`; console.error('Asset load error',p); };
 }
 
 /* ---------- AUDIO ---------- */
@@ -98,93 +94,73 @@ function ensurePlayBgm(){ bgm.play().catch(()=>{ document.addEventListener('touc
 let running = false;
 let score = 0;
 const scoreEl = document.getElementById('score');
-const heartsEl = document.getElementById('hearts');
+const heartsDOM = document.getElementById('hearts');
 const powerRow = document.getElementById('powerRow');
 
 const player = { x:0, y:0, w:96, h:96, speed:7, lives:3, blinkUntil:0, shieldUntil:0, fireLevel:0 };
 let bgY = 0;
 
-let enemies = [];   // {x,y,w,h,speed,hits,fade,alpha,lastShot}
-let bosses = [];    // {x,y,w,h,vx,hp,fade,alpha}
-let bulletsP = [];  // {x,y,w,h,spd}
-let bulletsE = [];  // {x,y,w,h,spd,color}
-let powers = [];    // {x,y,w,h,type,vy}
+let enemies = [], bosses = [], bulletsP = [], bulletsE = [], powers = [];
+let lastAutoFire = 0, lastSpawn = 0;
 
-let lastAutoFire = 0;
-let lastSpawn = 0;
-
-/* spawn flags for bosses */
-let spawn200=false, spawn600=false, spawn1000=false;
+/* boss spawn flags */
+let s200=false, s600=false, s1000=false;
 
 /* ---------- HELPERS ---------- */
-function rand(a,b){ return Math.random()*(b-a)+a; }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function now(){ return performance.now(); }
-function rectOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+const rand = (a,b)=> Math.random()*(b-a)+a;
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+const now = ()=> performance.now();
+const rectOverlap = (A,B)=> A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
 
 /* ---------- HUD ---------- */
 function updateHUD(){
   scoreEl.textContent = score;
-  const imgsHTML = [];
-  for(let i=0;i<3;i++){
-    const display = (i < player.lives) ? 'inline-block' : 'none';
-    heartsEl.children[i].style.display = display;
-  }
+  for(let i=0;i<3;i++) heartsDOM.children[i].style.display = (i < player.lives) ? 'inline-block' : 'none';
   powerRow.innerHTML = '';
-  if(player.fireLevel>0){
-    const img = document.createElement('img'); img.src = ASSET.powerDouble; img.title = player.fireLevel===1?'Double Fire':'Triple Fire'; powerRow.appendChild(img);
-  }
-  if(player.shieldUntil > Date.now()){
-    const img = document.createElement('img'); img.src = ASSET.powerShield; img.title = 'Shield'; powerRow.appendChild(img);
-  }
+  if(player.fireLevel>0){ const x=document.createElement('img'); x.src = PATHS.powerDouble; x.title = player.fireLevel===1?'Double':'Triple'; powerRow.appendChild(x); }
+  if(player.shieldUntil > Date.now()){ const x=document.createElement('img'); x.src=PATHS.powerShield; x.title='Shield'; powerRow.appendChild(x); }
   powerRow.style.display = powerRow.children.length ? 'flex' : 'none';
 }
 
-/* ---------- SIZING ---------- */
+/* ---------- SIZING & PLAYER PLACE ---------- */
 function positionPlayer(){
-  // scale player relative to frame
-  player.w = Math.round(Math.min(canvas.width * 0.14, imgs.player.width));
+  fitCanvas();
+  player.w = Math.round(Math.min(canvas.width*0.14, imgs.player.width));
   player.h = Math.round(player.w * (imgs.player.height / imgs.player.width));
-  player.x = (canvas.width - player.w) / 2;
+  player.x = (canvas.width - player.w)/2;
   player.y = canvas.height - player.h - Math.round(canvas.height * 0.06);
   clampPlayer();
 }
-function clampPlayer(){ 
+function clampPlayer(){
   player.x = clamp(player.x, 6, canvas.width - player.w - 6);
   player.y = clamp(player.y, 6, canvas.height - player.h - 6);
 }
 
-/* ---------- SPAWN ---------- */
+/* ---------- SPAWNERS ---------- */
 function spawnEnemy(){
-  const w = Math.round(Math.min(canvas.width * 0.12, imgs.enemy.width));
+  const w = Math.round(Math.min(canvas.width*0.12, imgs.enemy.width));
   const h = Math.round(w * (imgs.enemy.height / imgs.enemy.width));
-  enemies.push({ x: rand(8, canvas.width - w - 8), y: -h - 8, w, h, speed: rand(1.1,1.9), hits:0, fade:false, alpha:1, lastShot: Date.now() + rand(200,1200) });
+  enemies.push({ x: rand(8, canvas.width - w - 8), y: -h - 8, w, h, speed: rand(1.1,1.8), hits:0, fade:false, alpha:1, lastShot: Date.now() + rand(200,1200) });
 }
 function spawnPower(x,y){
   const types = ['life','double','shield'];
-  const type = types[Math.floor(Math.random()*types.length)];
+  const t = types[Math.floor(Math.random()*types.length)];
   const w = Math.round(Math.min(canvas.width*0.09, imgs.powerDouble.width));
   const h = Math.round(w * (imgs.powerDouble.height / imgs.powerDouble.width));
-  powers.push({ x: x + rand(-10,10), y, w, h, type, vy: 1.2 });
+  // small x jitter to distribute
+  powers.push({ x: clamp(x + rand(-40,40), 6, canvas.width - w - 6), y, w, h, type: t, vy: 1.2 });
 }
 function spawnBossCount(n){
   bosses = [];
   const w = Math.round(Math.min(canvas.width*0.28, imgs.boss.width));
   const h = Math.round(w * (imgs.boss.height / imgs.boss.width));
-  if(n===1){
-    bosses.push({ x:(canvas.width-w)/2, y:40, w, h, vx:1.2, hp:40, fade:false, alpha:1 });
-  } else if(n===2){
-    bosses.push({ x:60, y:40, w, h, vx:1.2, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:canvas.width-60-w, y:40, w, h, vx:-1.2, hp:40, fade:false, alpha:1 });
-  } else if(n===3){
-    bosses.push({ x:40, y:30, w, h, vx:1.2, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:(canvas.width-w)/2, y:20, w, h, vx:0.8, hp:40, fade:false, alpha:1 });
-    bosses.push({ x:canvas.width-40-w, y:30, w, h, vx:-1.2, hp:40, fade:false, alpha:1 });
-  }
+  if(n===1) bosses.push({ x:(canvas.width-w)/2, y:40, w, h, vx:1.2, hp:40, fade:false, alpha:1 });
+  if(n===2){ bosses.push({ x:60,y:40,w,h,vx:1.2,hp:40,fade:false,alpha:1}); bosses.push({ x:canvas.width-60-w,y:40,w,h,vx:-1.2,hp:40,fade:false,alpha:1}); }
+  if(n===3){ bosses.push({x:40,y:30,w,h,vx:1.2,hp:40,fade:false,alpha:1}); bosses.push({x:(canvas.width-w)/2,y:20,w,h,vx:0.8,hp:40,fade:false,alpha:1}); bosses.push({x:canvas.width-40-w,y:30,w,h,vx:-1.2,hp:40,fade:false,alpha:1}); }
 }
 
 /* ---------- FIRE ---------- */
-function autoFireTick(){
+function autoFire(){
   const bw = Math.round(player.w*0.14), bh = Math.round(player.h*0.28);
   if(player.fireLevel===0){
     bulletsP.push({ x: player.x + player.w/2 - bw/2, y: player.y - bh - 6, w: bw, h: bh, spd: 14 });
@@ -197,39 +173,29 @@ function autoFireTick(){
     bulletsP.push({ x: player.x + player.w - 6 - bw, y: player.y - bh - 6, w: bw, h: bh, spd: 14 });
   }
 }
-
 function enemyFire(e){
   const bw = Math.round(e.w*0.12), bh = Math.round(e.h*0.28);
   bulletsE.push({ x: e.x + e.w/2 - bw/2, y: e.y + e.h + 6, w: bw, h: bh, spd: 5, color:'red' });
 }
-
 function bossFire(b){
   const bw = Math.round(b.w*0.14), bh = Math.round(b.h*0.28);
   const lanes = [ b.x + 10, b.x + b.w*0.33, b.x + b.w*0.66, b.x + b.w - bw - 10 ];
-  for(let i=0;i<4;i++){
-    const lx = clamp(lanes[i], 6, canvas.width - bw - 6);
-    bulletsE.push({ x: lx, y: b.y + b.h + 6, w: bw, h: bh, spd: 6, color:'green' });
-  }
+  for(let i=0;i<4;i++){ const lx = clamp(lanes[i],6,canvas.width-bw-6); bulletsE.push({ x: lx, y: b.y + b.h + 6, w: bw, h: bh, spd: 6, color:'green' }); }
 }
 
-/* ---------- COLLISIONS & UPDATES ---------- */
+/* ---------- UPDATE ---------- */
 let lastTime = performance.now();
-
 function update(ts){
   const dt = Math.max(1, ts - lastTime);
   lastTime = ts;
 
   // background scroll
-  bgY += 1.6 * (dt/16);
-  if(bgY >= canvas.height) bgY = 0;
+  bgY += 1.6 * (dt/16); if(bgY >= canvas.height) bgY = 0;
 
   // auto-fire
-  if(Date.now() - lastAutoFire > AUTO_FIRE_MS){
-    lastAutoFire = Date.now();
-    autoFireTick();
-  }
+  if(Date.now() - lastAutoFire > AUTO_FIRE_MS){ lastAutoFire = Date.now(); autoFire(); }
 
-  // spawn enemies occasionally
+  // spawn enemies & occasional powers
   if(Date.now() - lastSpawn > ENEMY_SPAWN_MS){
     lastSpawn = Date.now();
     if(Math.random() < 0.9) spawnEnemy();
@@ -240,11 +206,7 @@ function update(ts){
   for(let i=enemies.length-1;i>=0;i--){
     const e = enemies[i];
     e.y += e.speed * (dt/16);
-    // enemy shot timing
-    if(Date.now() - e.lastShot > (ENEMY_SHOT_MIN_MS + Math.random()*1200)){
-      e.lastShot = Date.now();
-      enemyFire(e);
-    }
+    if(Date.now() - e.lastShot > (ENEMY_SHOT_MIN_MS + Math.random()*1200)){ e.lastShot = Date.now(); enemyFire(e); }
     if(e.y > canvas.height + 60) enemies.splice(i,1);
   }
 
@@ -257,98 +219,64 @@ function update(ts){
   }
 
   // bullets update
-  for(let i=bulletsP.length-1;i>=0;i--){
-    bulletsP[i].y -= bulletsP[i].spd * (dt/16);
-    if(bulletsP[i].y < -60) bulletsP.splice(i,1);
-  }
-  for(let i=bulletsE.length-1;i>=0;i--){
-    bulletsE[i].y += bulletsE[i].spd * (dt/16);
-    if(bulletsE[i].y > canvas.height + 120) bulletsE.splice(i,1);
-  }
+  for(let i=bulletsP.length-1;i>=0;i--){ bulletsP[i].y -= bulletsP[i].spd * (dt/16); if(bulletsP[i].y < -60) bulletsP.splice(i,1); }
+  for(let i=bulletsE.length-1;i>=0;i--){ bulletsE[i].y += bulletsE[i].spd * (dt/16); if(bulletsE[i].y > canvas.height + 120) bulletsE.splice(i,1); }
 
   // powers update
-  for(let i=powers.length-1;i>=0;i--){
-    powers[i].y += powers[i].vy * (dt/16);
-    if(powers[i].y > canvas.height + 60) powers.splice(i,1);
-  }
+  for(let i=powers.length-1;i>=0;i--){ powers[i].y += powers[i].vy * (dt/16); if(powers[i].y > canvas.height + 60) powers.splice(i,1); }
 
-  // collisions: player bullets -> enemies (3 hits)
+  // player bullets -> enemies (3 hits)
   for(let i=bulletsP.length-1;i>=0;i--){
     const pb = bulletsP[i];
-    // enemies
     for(let j=enemies.length-1;j>=0;j--){
       const e = enemies[j];
       if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:e.x,y:e.y,w:e.w,h:e.h})){
         bulletsP.splice(i,1);
         e.hits++;
         e.alpha = 1;
-        if(e.hits >= 3){
-          e.fade = true; e.alpha = 1;
-          if(Math.random() < POWER_SPAWN_CHANCE) spawnPower(e.x, e.y);
-          score += 10; updateHUD();
-        }
+        if(e.hits >= 3){ e.fade = true; e.alpha = 1; if(Math.random() < POWER_DROP_CHANCE) spawnPower(e.x, e.y); score += 10; updateHUD(); }
         break;
       }
     }
-    // bosses (each bullet = 1 HP)
+    // bosses
     for(let bi=bosses.length-1;bi>=0;bi--){
       const bo = bosses[bi];
       if(rectOverlap({x:pb.x,y:pb.y,w:pb.w,h:pb.h},{x:bo.x,y:bo.y,w:bo.w,h:bo.h})){
-        bulletsP.splice(i,1);
-        bo.hp -= 1;
-        bo.alpha = 1;
-        if(bo.hp <= 0){
-          bo.fade = true; bo.alpha = 1;
-        }
-        score += 1; updateHUD();
-        break;
+        bulletsP.splice(i,1); bo.hp -= 1; bo.alpha = 1; if(bo.hp <= 0){ bo.fade=true; bo.alpha=1; } score += 1; updateHUD(); break;
       }
     }
   }
 
-  // fade removal for enemies & bosses
-  for(let i=enemies.length-1;i>=0;i--){
-    if(enemies[i].fade){
-      enemies[i].alpha -= 0.06 * (dt/16);
-      if(enemies[i].alpha <= 0) enemies.splice(i,1);
-    }
-  }
-  for(let i=bosses.length-1;i>=0;i--){
-    if(bosses[i].fade){
-      bosses[i].alpha -= 0.03 * (dt/16);
-      if(bosses[i].alpha <= 0){ bosses.splice(i,1); score += 100; updateHUD(); }
-    }
-  }
+  // fade & remove enemies and bosses
+  for(let i=enemies.length-1;i>=0;i--){ if(enemies[i].fade){ enemies[i].alpha -= 0.06 * (dt/16); if(enemies[i].alpha <= 0) enemies.splice(i,1); } }
+  for(let i=bosses.length-1;i>=0;i--){ if(bosses[i].fade){ bosses[i].alpha -= 0.03 * (dt/16); if(bosses[i].alpha <= 0){ bosses.splice(i,1); score += 100; updateHUD(); } } }
 
-  // bulletsE -> player
+  // enemy bullets -> player
   for(let i=bulletsE.length-1;i>=0;i--){
     const eb = bulletsE[i];
     if(rectOverlap({x:eb.x,y:eb.y,w:eb.w,h:eb.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
       bulletsE.splice(i,1);
-      if(player.shieldUntil > Date.now()){ /* protected */ } else {
-        player.lives--; player.blinkUntil = Date.now() + 1000; updateHUD();
-        if(player.lives <= 0){ running = false; setTimeout(()=>{ alert('Game Over! Score: '+score); location.reload(); }, 80); return; }
-      }
+      if(player.shieldUntil > Date.now()) { /* protected */ } else { player.lives--; player.blinkUntil = Date.now() + 1000; updateHUD(); if(player.lives<=0){ running=false; setTimeout(()=>{ alert('Game Over! Score: '+score); location.reload(); },80); return; } }
     }
   }
 
-  // player picks powerups
+  // pick powers
   for(let i=powers.length-1;i>=0;i--){
     const p = powers[i];
     if(rectOverlap({x:p.x,y:p.y,w:p.w,h:p.h},{x:player.x,y:player.y,w:player.w,h:player.h})){
-      if(p.type === 'life'){ if(player.lives < 3){ player.lives++; updateHUD(); } }
-      else if(p.type === 'double'){ if(player.fireLevel < 2) player.fireLevel++; }
-      else if(p.type === 'shield'){ player.shieldUntil = Date.now() + 5000; updateHUD(); }
+      if(p.type==='life'){ if(player.lives<3){ player.lives++; updateHUD(); } }
+      else if(p.type==='double'){ if(player.fireLevel<2) player.fireLevel++; }
+      else if(p.type==='shield'){ player.shieldUntil = Date.now() + 5000; updateHUD(); }
       powers.splice(i,1);
     }
   }
 
   // boss spawn thresholds
-  if(score >= 200 && !spawn200){ spawnBossCount(1); spawn200=true; }
-  if(score >= 600 && !spawn600){ spawnBossCount(2); spawn600=true; }
-  if(score >= 1000 && !spawn1000){ spawnBossCount(3); spawn1000=true; }
+  if(score >= 200 && !s200){ spawnBossCount(1); s200=true; }
+  if(score >= 600 && !s600){ spawnBossCount(2); s600=true; }
+  if(score >= 1000 && !s1000){ spawnBossCount(3); s1000=true; }
 
-  // victory condition
+  // victory check
   if(score >= 1000 && bosses.length===0 && enemies.length===0){ running=false; setTimeout(()=>{ alert('You Win! Score: '+score); location.reload(); },120); return; }
 }
 
@@ -356,76 +284,87 @@ function update(ts){
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // background
-  if(imgs.bg){
-    const h = canvas.height;
-    const y = (bgY % h);
-    ctx.drawImage(imgs.bg, 0, y - h, canvas.width, h);
-    ctx.drawImage(imgs.bg, 0, y, canvas.width, h);
-  } else { ctx.fillStyle='#071022'; ctx.fillRect(0,0,canvas.width,canvas.height); }
+  // background double-draw
+  if(imgs.bg){ const h = canvas.height; const y = (bgY % h); ctx.drawImage(imgs.bg,0,y-h,canvas.width,h); ctx.drawImage(imgs.bg,0,y,canvas.width,h); } 
+  else { ctx.fillStyle='#071022'; ctx.fillRect(0,0,canvas.width,canvas.height); }
 
   // powers
-  powers.forEach(p => {
-    if(p.type==='life') ctx.drawImage(imgs.powerLife, p.x, p.y, p.w, p.h);
-    else if(p.type==='double') ctx.drawImage(imgs.powerDouble, p.x, p.y, p.w, p.h);
-    else if(p.type==='shield') ctx.drawImage(imgs.powerShield, p.x, p.y, p.w, p.h);
-  });
+  powers.forEach(p => { if(p.type==='life') ctx.drawImage(imgs.powerLife,p.x,p.y,p.w,p.h); else if(p.type==='double') ctx.drawImage(imgs.powerDouble,p.x,p.y,p.w,p.h); else ctx.drawImage(imgs.powerShield,p.x,p.y,p.w,p.h); });
 
   // enemies
-  enemies.forEach(e => { ctx.save(); ctx.globalAlpha = e.fade ? (e.alpha||1) : 1; ctx.drawImage(imgs.enemy, e.x, e.y, e.w, e.h); ctx.restore(); });
+  enemies.forEach(e => { ctx.save(); ctx.globalAlpha = e.fade ? (e.alpha||1) : 1; ctx.drawImage(imgs.enemy,e.x,e.y,e.w,e.h); ctx.restore(); });
 
   // bosses
-  bosses.forEach(b => {
-    ctx.save(); ctx.globalAlpha = b.fade ? (b.alpha||1) : 1; ctx.drawImage(imgs.boss, b.x, b.y, b.w, b.h);
-    // hp bar (out of 40)
-    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(b.x, b.y-10, b.w, 6);
-    ctx.fillStyle='lime'; ctx.fillRect(b.x, b.y-10, b.w * (b.hp / 40), 6);
-    ctx.restore();
-  });
+  bosses.forEach(b => { ctx.save(); ctx.globalAlpha = b.fade ? (b.alpha||1) : 1; ctx.drawImage(imgs.boss,b.x,b.y,b.w,b.h); ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(b.x,b.y-10,b.w,6); ctx.fillStyle='lime'; ctx.fillRect(b.x,b.y-10,b.w*(b.hp/40),6); ctx.restore(); });
 
-  // player blink
-  if(player.blinkUntil > Date.now()){ if(Math.floor(Date.now()/100)%2===0) ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h); } 
-  else ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h);
+  // player (blink)
+  if(player.blinkUntil > Date.now()){ if(Math.floor(Date.now()/100)%2===0) ctx.drawImage(imgs.player,player.x,player.y,player.w,player.h); } else ctx.drawImage(imgs.player,player.x,player.y,player.w,player.h);
 
   // bullets
-  bulletsP.forEach(b => ctx.drawImage(imgs.bulletP, b.x, b.y, b.w, b.h));
-  bulletsE.forEach(b => { if(b.color==='green') ctx.drawImage(imgs.bulletP, b.x, b.y, b.w, b.h); else ctx.drawImage(imgs.bulletE, b.x, b.y, b.w, b.h); });
+  bulletsP.forEach(b => ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h));
+  bulletsE.forEach(b => { if(b.color==='green') ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h); else ctx.drawImage(imgs.bulletE,b.x,b.y,b.w,b.h); });
 }
 
 /* ---------- MAIN LOOP ---------- */
-let lastRender = performance.now();
-function loop(t){
+let lastFrame = performance.now();
+function loop(ts){
   if(!running) return;
-  update(t);
+  update(ts);
   draw();
   updateHUD();
   requestAnimationFrame(loop);
 }
 
-/* ---------- INPUT: SWIPE/DRAG for mobile ---------- */
-let dragging=false, lastTouchX=null;
-canvas.addEventListener('touchstart', e=>{ dragging=true; lastTouchX = e.touches[0].clientX; ensurePlayBgm(); }, {passive:false});
-canvas.addEventListener('touchmove', e=>{ e.preventDefault(); if(dragging){ const tx = e.touches[0].clientX; const rect = canvas.getBoundingClientRect(); const dx = tx - lastTouchX; player.x += dx * (canvas.width / rect.width); lastTouchX = tx; clampPlayer(); } }, {passive:false});
-canvas.addEventListener('touchend', e=>{ dragging=false; lastTouchX=null; }, {passive:false});
+/* ---------- SWIPE INPUT (NO DRAG) ---------- */
+let touchStartX = null, touchStartTime = 0;
+canvas.addEventListener('touchstart', e => {
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartTime = Date.now();
+  ensurePlayBgm();
+}, {passive:true});
 
-// also allow simple tap to manualFire (extra volley)
-canvas.addEventListener('click', ()=>{ autoFireTick(); });
+// Detect swipe on touchend: compare startX to endX; step move SWIPE_STEP px per swipe
+canvas.addEventListener('touchend', e => {
+  if(touchStartX === null) return;
+  // if changedTouches not available, use changedTouches[0]
+  const touch = e.changedTouches && e.changedTouches[0];
+  if(!touch) { touchStartX = null; return; }
+  const dx = touch.clientX - touchStartX;
+  const dt = Date.now() - touchStartTime;
+  // require min displacement
+  if(Math.abs(dx) > SWIPE_THRESHOLD && dt < 700){ // quick-ish swipe
+    if(dx > 0){ // right swipe
+      player.x += SWIPE_STEP;
+    } else { // left swipe
+      player.x -= SWIPE_STEP;
+    }
+    clampPlayer();
+  } else {
+    // short tap: manual extra fire (optional)
+    autoFire();
+  }
+  touchStartX = null;
+}, {passive:true});
 
-/* ---------- INIT ---------- */
-function init(){
+/* ---------- START ---------- */
+function start(){
   loadingEl.style.display = 'none';
-  fitCanvas();
   positionPlayer();
   ensurePlayBgm();
   running = true;
-  lastTime = performance.now();
+  lastAutoFire = Date.now();
+  lastSpawn = Date.now();
+  lastFrame = performance.now();
+  updateHUD();
   requestAnimationFrame(loop);
-  // small periodic power spawn to avoid clustering
-  setInterval(()=>{ if(Math.random() < 0.22) spawnPower(rand(40, canvas.width-80), -40); }, 9000);
+
+  // occasional spread power spawner to avoid clustering
+  setInterval(()=>{ if(Math.random()<0.22) spawnPower(rand(40, canvas.width-80), -40); }, 9000);
 }
 
-/* ---------- Wait for assets (in case already loaded) ---------- */
-(function waitReady(){ if(Object.keys(imgs).length === Object.keys(ASSET).length) init(); else setTimeout(waitReady,120); })();
+/* ---------- WAIT FOR IMAGES ---------- */
+(function waitLoad(){ if(Object.keys(imgs).length === Object.keys(PATHS).length) start(); else setTimeout(waitLoad,120); })();
 
 </script>
 </body>
