@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>Aircraft — Final (Boss Waves + Fixed Collisions + Enemy Fire)</title>
+<title>Aircraft — Final (Power‑ups + Slower Fire Rate)</title>
 <style>
   :root{
     --ratio-w: 75vw;
@@ -18,7 +18,7 @@
 
 canvas{display:block;width:100%;height:100%}
 
-.controls{ margin-top:14px; display:flex; gap:40px; justify-content:center; } .btn{ width:var(--btn-size); height:var(--btn-size); background:#111; border:2px solid #555; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; } .btn:active{background:#333} </style>
+.controls{margin-top:14px;display:flex;gap:40px;justify-content:center;} .btn{width:var(--btn-size);height:var(--btn-size);background:#111;border:2px solid #555;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;} .btn:active{background:#333} </style>
 
 </head>
 <body>
@@ -35,10 +35,7 @@ canvas{display:block;width:100%;height:100%}
 </div><audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
 
 <script>
-/* ========================================================= */
-/* =============== FULL GAME WITH FIXES ==================== */
-/* ========================================================= */
-
+/* ========================== CONFIG =========================== */
 const PATHS = {
   bg:'./assets/background.png', player:'./assets/player.png', enemy:'./assets/enemy.png', boss:'./assets/boss.png',
   bulletP:'./assets/bullet_green.png', bulletE:'./assets/bullet_red.png',
@@ -46,37 +43,40 @@ const PATHS = {
   heart:'./assets/heart.png'
 };
 
+/* Fire rate slower now */
+const PLAYER_FIRE_MS = 260;        /* was 120 */
+
 const ENEMY_FIRE_MS = 900;
 const ENEMY_SPAWN_MS = 1400;
-const PLAYER_FIRE_MS = 120;
-const POWER_SPAWN_MS = 2200;
+const POWER_SPAWN_MS = 3400;       /* more time between power-ups */
+const POWER_DROP_CHANCE = 0.25;
 
-/* NEW: Boss spawns every 200 score, incrementing count */
+/* Boss logic */
 let nextBossScore = 200;
 let bossWaveCount = 1;
 
-const frame = document.getElementById('frame');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-let DPR = window.devicePixelRatio || 1;
+/* ========================== SETUP =========================== */
+const frame=document.getElementById('frame');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+let DPR=window.devicePixelRatio||1;
 
 function fitCanvas(){
-  const r = frame.getBoundingClientRect();
-  canvas.width = r.width * DPR;
-  canvas.height = r.height * DPR;
+  const r=frame.getBoundingClientRect();
+  canvas.width=r.width*DPR;
+  canvas.height=r.height*DPR;
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
 fitCanvas(); window.addEventListener('resize', fitCanvas);
 
-/* LOAD ASSETS */
+/* Load assets */
 const imgs={}, total=Object.keys(PATHS).length; let loaded=0;
-const loadingEl=document.getElementById('loading');
 for(const [k,p] of Object.entries(PATHS)){
   const I=new Image(); I.src=p;
-  I.onload=()=>{ imgs[k]=I; loaded++; if(loaded===total) startGame(); };
+  I.onload=()=>{ imgs[k]=I; if(++loaded===total) startGame(); };
 }
 
-/* STATE */
+/* ========================== GAME STATE =========================== */
 let running=false;
 let score=0;
 let lastPlayerShot=0, lastEnemySpawn=0, lastPowerSpawn=0;
@@ -87,141 +87,182 @@ const player={x:0,y:0,w:70,h:70,lives:3,fireLevel:0,shieldUntil:0};
 
 function positionPlayer(){
   const r=frame.getBoundingClientRect();
-  player.w = r.width*0.16;
-  player.h = player.w;
-  player.x = (r.width-player.w)/2;
-  player.y = r.height-player.h-20;
+  player.w=r.width*0.16;
+  player.h=player.w;
+  player.x=(r.width-player.w)/2;
+  player.y=r.height-player.h-20;
 }
 
-/* HUD */
+/* ========================== HUD =========================== */
 const scoreEl=document.getElementById('score');
 const heartsDOM=document.getElementById('hearts');
+const powerRow=document.getElementById('powerRow');
+
 function updateHUD(){
-  scoreEl.textContent = score;
-  heartsDOM.innerHTML = '';
+  scoreEl.textContent=score;
+
+  heartsDOM.innerHTML='';
   for(let i=0;i<player.lives;i++){
-    const h=document.createElement('img'); h.src=PATHS.heart; h.style.width='32px'; heartsDOM.appendChild(h);
+    const hi=document.createElement('img'); hi.src=PATHS.heart; hi.style.width='32px'; heartsDOM.appendChild(hi);
+  }
+
+  powerRow.innerHTML='';
+  if(player.fireLevel>0){ let p=document.createElement('img'); p.src=PATHS.powerDouble; p.style.width='36px'; powerRow.appendChild(p); }
+  if(player.shieldUntil>Date.now()){ let s=document.createElement('img'); s.src=PATHS.powerShield; s.style.width='36px'; powerRow.appendChild(s); }
+}
+
+/* ========================== BUTTONS =========================== */
+const btnLeft=document.getElementById('btnLeft');
+const btnRight=document.getElementById('btnRight');
+
+btnLeft.addEventListener('touchstart',()=>{ player.x-=45; clampPlayer(); });
+btnRight.addEventListener('touchstart',()=>{ player.x+=45; clampPlayer(); });
+
+function clampPlayer(){
+  const r=frame.getBoundingClientRect();
+  player.x=Math.max(6,Math.min(r.width-player.w-6,player.x));
+}
+
+/* ========================== SHOOT =========================== */
+function shootPlayer(){
+  const baseX = player.x + player.w/2 - 6;
+
+  if(player.fireLevel===0){
+    bulletsP.push({x:baseX,y:player.y-26,w:12,h:26,spd:11});
+  }
+  else if(player.fireLevel===1){ /* DOUBLE FIRE */
+    bulletsP.push({x:player.x+10,y:player.y-26,w:12,h:26,spd:11});
+    bulletsP.push({x:player.x+player.w-22,y:player.y-26,w:12,h:26,spd:11});
+  }
+  else { /* TRIPLE FIRE */
+    bulletsP.push({x:baseX,y:player.y-26,w:12,h:26,spd:11});
+    bulletsP.push({x:player.x+10,y:player.y-26,w:12,h:26,spd:11});
+    bulletsP.push({x:player.x+player.w-22,y:player.y-26,w:12,h:26,spd:11});
   }
 }
 
-/* BUTTON CONTROLS */
-const btnLeft=document.getElementById('btnLeft');
-const btnRight=document.getElementById('btnRight');
-btnLeft.addEventListener('touchstart',()=>{ player.x -= 45; clampPlayer(); });
-btnRight.addEventListener('touchstart',()=>{ player.x += 45; clampPlayer(); });
-function clampPlayer(){ const r=frame.getBoundingClientRect(); player.x=Math.max(6,Math.min(r.width-player.w-6,player.x)); }
+/* ========================== POWER-UP SPAWN =========================== */
+function spawnPower(){
+  const r=frame.getBoundingClientRect();
+  const types=["double","life","shield"];
+  const type=types[Math.floor(Math.random()*types.length)];
 
-/* SHOOT */
-function shootPlayer(){ bulletsP.push({x:player.x+player.w/2-6,y:player.y-26,w:12,h:26,spd:11}); }
+  powers.push({
+    type,
+    x:Math.random()*(r.width-50),
+    y:-60,
+    w:50,
+    h:50,
+    spd:1.2
+  });
+}
 
-/* SPAWN ENEMY */
+/* ========================== ENEMIES =========================== */
 function spawnEnemy(){
   const r=frame.getBoundingClientRect();
   enemies.push({ x:Math.random()*(r.width-60), y:-70, w:60, h:60, speed:2+Math.random()*1.2, lastShot:Date.now() });
 }
 
-/* SPAWN BOSS */
+/* ========================== BOSSES =========================== */
 function spawnBossWave(){
   const r=frame.getBoundingClientRect();
   for(let i=0;i<bossWaveCount;i++){
-    bosses.push({ x:40+i*120, y:-150, w:120, h:120, hp:45+(bossWaveCount*10), vx:1.2, lastShot:Date.now() });
+    bosses.push({ x:(i*140)+40, y:-160, w:130, h:130, hp:60+(bossWaveCount*15), vx:1.1 });
   }
   bossWaveCount++;
-  nextBossScore += 200;
+  nextBossScore+=200;
 }
 
-/* LOOP UPDATE */
-function update(){
-  const r=frame.getBoundingClientRect();
+/* ========================== COLLISION =========================== */
+function rectHit(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
 
-  /* background */
-  bgY+=1.4; if(bgY>=r.height) bgY=0;
-
-  /* auto-fire */
-  if(Date.now()-lastPlayerShot > PLAYER_FIRE_MS){ lastPlayerShot=Date.now(); shootPlayer(); }
-
-  /* enemy spawn */
-  if(Date.now()-lastEnemySpawn > ENEMY_SPAWN_MS){ lastEnemySpawn=Date.now(); spawnEnemy(); }
-
-  /* enemy bullets */
-  enemies.forEach(e=>{
-    if(Date.now()-e.lastShot > ENEMY_FIRE_MS){ e.lastShot=Date.now(); bulletsE.push({x:e.x+e.w/2-6,y:e.y+e.h,w:12,h:26,spd:6}); }
-  });
-
-  /* boss bullets */
-  bosses.forEach(b=>{
-    if(Date.now()-b.lastShot > 800){ b.lastShot=Date.now(); bulletsE.push({x:b.x+b.w/2-8,y:b.y+b.h,w:14,h:30,spd:6}); }
-  });
-
-  bulletsP.forEach(b=>b.y-=b.spd); bulletsP=bulletsP.filter(b=>b.y>-40);
-  bulletsE.forEach(b=>b.y+=b.spd); bulletsE=bulletsE.filter(b=>b.y<r.height+40);
-
-  enemies.forEach(e=>e.y+=e.speed);
-  enemies = enemies.filter(e=>e.y<r.height+80);
-
-  bosses.forEach(b=>{
-    b.y+=0.8;
-    b.x+=b.vx;
-    if(b.x<=6 || b.x+b.w>=r.width-6) b.vx*=-1;
-  });
-
-  /* COLLISIONS: Player bullets → enemies */
-  bulletsP = bulletsP.filter(pb=>{
-    let hit=false;
-    enemies = enemies.filter(e=>{
-      if(pb.x < e.x+e.w && pb.x+pb.w > e.x && pb.y < e.y+e.h && pb.y+pb.h > e.y){ hit=true; score+=10; return false; }
-      return true;
-    });
-    bosses.forEach(b=>{
-      if(pb.x < b.x+b.w && pb.x+pb.w > b.x && pb.y < b.y+b.h && pb.y+pb.h > b.y){ hit=true; b.hp--; score+=2; }
-    });
-    return !hit;
-  });
-
-  bosses = bosses.filter(b=>b.hp>0);
-
-  /* enemy bullets → player */
-  bulletsE = bulletsE.filter(eb=>{
-    if(eb.x < player.x+player.w && eb.x+eb.w > player.x && eb.y < player.y+player.h && eb.y+eb.h > player.y){ playerHit(); return false; }
-    return true;
-  });
-
-  /* boss wave trigger */
-  if(score >= nextBossScore){ spawnBossWave(); }
-
-  updateHUD();
-}
-
+/* player hit */
 function playerHit(){
-  if(player.shieldUntil > Date.now()) return;
+  if(player.shieldUntil>Date.now()) return;
   player.lives--;
   if(player.lives<=0){ alert("Game Over — Score: "+score); location.reload(); }
 }
 
-/* DRAW */
+/* ========================== UPDATE LOOP =========================== */
+function update(){
+  const r=frame.getBoundingClientRect();
+
+  bgY+=1.4; if(bgY>=r.height) bgY=0;
+
+  if(Date.now()-lastPlayerShot>PLAYER_FIRE_MS){ lastPlayerShot=Date.now(); shootPlayer(); }
+
+  if(Date.now()-lastEnemySpawn>ENEMY_SPAWN_MS){ lastEnemySpawn=Date.now(); spawnEnemy(); }
+  if(Date.now()-lastPowerSpawn>POWER_SPAWN_MS){ lastPowerSpawn=Date.now(); spawnPower(); }
+
+  enemies.forEach(e=>{
+    if(Date.now()-e.lastShot>ENEMY_FIRE_MS){ e.lastShot=Date.now(); bulletsE.push({x:e.x+e.w/2-6,y:e.y+e.h,w:12,h:26,spd:6}); }
+    e.y+=e.speed;
+  });
+  enemies=enemies.filter(e=>e.y<r.height+80);
+
+  bosses.forEach(b=>{
+    b.y+=0.9;
+    b.x+=b.vx;
+    if(b.x<=6||b.x+b.w>=r.width-6) b.vx*=-1;
+    bulletsE.push({x:b.x+b.w/2-8,y:b.y+b.h,w:14,h:30,spd:6});
+  });
+
+  bulletsP.forEach(b=>b.y-=b.spd);
+  bulletsE.forEach(b=>b.y+=b.spd);
+  powers.forEach(p=>p.y+=p.spd);
+
+  bulletsP = bulletsP.filter(pb=>{
+    let hit=false;
+
+    enemies = enemies.filter(e=>{
+      if(rectHit(pb,e)){ hit=true; score+=10; return false; }
+      return true;
+    });
+
+    bosses.forEach(b=>{
+      if(rectHit(pb,b)){ hit=true; b.hp--; score+=2; }
+    });
+
+    return !hit;
+  });
+
+  bosses=bosses.filter(b=>b.hp>0);
+
+  bulletsE = bulletsE.filter(eb=>{
+    if(rectHit(eb,player)){ playerHit(); return false; }
+    return eb.y<r.height+50;
+  });
+
+  powers = powers.filter(p=>{
+    if(rectHit(p,player)){
+      if(p.type==="double") player.fireLevel=Math.min(2,player.fireLevel+1);
+      if(p.type==="life") player.lives=Math.min(3,player.lives+1);
+      if(p.type==="shield") player.shieldUntil=Date.now()+5000;
+      return false;
+    }
+    return p.y<r.height+50;
+  });
+
+  if(score>=nextBossScore){ spawnBossWave(); }
+
+  updateHUD();
+}
+
+/* ========================== DRAW LOOP =========================== */
 function draw(){
   const r=frame.getBoundingClientRect();
   ctx.clearRect(0,0,r.width,r.height);
 
   if(imgs.bg){
-    const h=r.height, y=bgY%h;
+    const h=r.height,y=bgY%h;
     ctx.drawImage(imgs.bg,0,y-h,r.width,h);
     ctx.drawImage(imgs.bg,0,y,r.width,h);
   }
 
+  powers.forEach(p=>{
+    const img = p.type==="double" ? imgs.powerDouble : p.type==="life" ? imgs.powerLife : imgs.powerShield;
+    ctx.drawImage(img,p.x,p.y,p.w,p.h);
+  });
+
   enemies.forEach(e=>ctx.drawImage(imgs.enemy,e.x,e.y,e.w,e.h));
-  bosses.forEach(b=>ctx.drawImage(imgs.boss,b.x,b.y,b.w,b.h));
-  bulletsP.forEach(b=>ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h));
-  bulletsE.forEach(b=>ctx.drawImage(imgs.bulletE,b.x,b.y,b.w,b.h));
-
-  ctx.drawImage(imgs.player,player.x,player.y,player.w,player.h);
-}
-
-/* MAIN LOOP */
-function loop(){ if(!running) return; update(); draw(); requestAnimationFrame(loop); }
-
-/* START */
-function startGame(){ loadingEl.style.display='none'; positionPlayer(); running=true; requestAnimationFrame(loop); }
-
-</script></body>
-</html>
+  bosses.for
