@@ -4,10 +4,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>Aircraft — Final (Buttons + 3:4)</title>
+<title>Aircraft — Final (Boss Waves + Fixed Collisions + Enemy Fire)</title>
 <style>
   :root{
-    --ratio-w: 75vw;           /* 3:4 ratio */
+    --ratio-w: 75vw;
     --ratio-h: calc(var(--ratio-w) * 1.33);
     --btn-size: 70px;
   }
@@ -18,189 +18,210 @@
 
 canvas{display:block;width:100%;height:100%}
 
-/* BUTTON CONTROLS */ .controls{ margin-top:14px; display:flex; gap:40px; justify-content:center; }
-
-.btn{ width:var(--btn-size); height:var(--btn-size); background:#111; border:2px solid #555; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; } .btn:active{background:#333} </style>
+.controls{ margin-top:14px; display:flex; gap:40px; justify-content:center; } .btn{ width:var(--btn-size); height:var(--btn-size); background:#111; border:2px solid #555; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; } .btn:active{background:#333} </style>
 
 </head>
 <body>
 <div class="wrap">  <div class="frame" id="frame">
-    <canvas id="canvas"></canvas><div class="hud" id="hud" style="position:absolute;left:8px;top:8px;color:#fff;font-family:Arial;font-weight:700;z-index:30">
-  Score: <span id="score">0</span>
-</div>
-
+    <canvas id="canvas"></canvas><div id="hud" style="position:absolute;left:8px;top:8px;color:#fff;font-family:Arial;font-weight:700;z-index:30">Score: <span id="score">0</span></div>
 <div id="hearts" style="position:absolute;right:8px;top:8px;z-index:30;display:flex;gap:6px"></div>
-
 <div id="powerRow" style="position:absolute;right:8px;top:48px;z-index:30;display:flex;flex-direction:column;gap:6px"></div>
-
 <div id="loading" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-family:Arial;z-index:40">Loading...</div>
 
-  </div>  <!-- BUTTON CONTROLS -->  <div class="controls">
+  </div>  <div class="controls">
     <div class="btn" id="btnLeft">←</div>
     <div class="btn" id="btnRight">→</div>
   </div>
 </div><audio id="bgm" src="./sounds/bgm.mpeg" loop></audio>
 
 <script>
-/* ========== GAME CONFIG ========== */
+/* ========================================================= */
+/* =============== FULL GAME WITH FIXES ==================== */
+/* ========================================================= */
+
 const PATHS = {
-  bg:'./assets/background.png',
-  player:'./assets/player.png',
-  enemy:'./assets/enemy.png',
-  boss:'./assets/boss.png',
-  bulletP:'./assets/bullet_green.png',
-  bulletE:'./assets/bullet_red.png',
-  powerDouble:'./assets/power_double_fire.png',
-  powerShield:'./assets/power_shield.png',
-  powerLife:'./assets/power_extra_life.png',
+  bg:'./assets/background.png', player:'./assets/player.png', enemy:'./assets/enemy.png', boss:'./assets/boss.png',
+  bulletP:'./assets/bullet_green.png', bulletE:'./assets/bullet_red.png',
+  powerDouble:'./assets/power_double_fire.png', powerShield:'./assets/power_shield.png', powerLife:'./assets/power_extra_life.png',
   heart:'./assets/heart.png'
 };
 
-const ENEMY_FIRE_MS = 600;
-const ENEMY_SPAWN_MS = 1500;   // SLOWER ENEMY SPAWN
-const PLAYER_FIRE_MS = 130;    // auto fire only, no button
-const POWER_SPAWN_MS = 2400;
-const POWER_DROP_CHANCE = 0.22;
+const ENEMY_FIRE_MS = 900;
+const ENEMY_SPAWN_MS = 1400;
+const PLAYER_FIRE_MS = 120;
+const POWER_SPAWN_MS = 2200;
 
-/* ========== ELEMENTS ========== */
+/* NEW: Boss spawns every 200 score, incrementing count */
+let nextBossScore = 200;
+let bossWaveCount = 1;
+
 const frame = document.getElementById('frame');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-let DPR = Math.max(1, window.devicePixelRatio || 1);
+let DPR = window.devicePixelRatio || 1;
 
 function fitCanvas(){
   const r = frame.getBoundingClientRect();
-  canvas.style.width = r.width + 'px';
-  canvas.style.height = r.height + 'px';
   canvas.width = r.width * DPR;
   canvas.height = r.height * DPR;
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
-fitCanvas();
-window.addEventListener('resize', fitCanvas);
+fitCanvas(); window.addEventListener('resize', fitCanvas);
 
-/* ========== ASSET LOADING ========== */
-const imgs = {}; let toLoad = Object.keys(PATHS).length;
-const loadingEl = document.getElementById('loading');
-
+/* LOAD ASSETS */
+const imgs={}, total=Object.keys(PATHS).length; let loaded=0;
+const loadingEl=document.getElementById('loading');
 for(const [k,p] of Object.entries(PATHS)){
-  const I = new Image(); I.src = p;
-  I.onload = ()=>{ imgs[k]=I; toLoad--; if(toLoad===0) startGame(); };
+  const I=new Image(); I.src=p;
+  I.onload=()=>{ imgs[k]=I; loaded++; if(loaded===total) startGame(); };
 }
 
-/* ========== STATE ========== */
-let running = false;
-let score = 0;
-let lastPlayerShot = 0;
-let lastEnemySpawn = 0;
-let lastPowerSpawn = 0;
-let lastBossScore = null;
+/* STATE */
+let running=false;
+let score=0;
+let lastPlayerShot=0, lastEnemySpawn=0, lastPowerSpawn=0;
+let bulletsP=[], bulletsE=[], enemies=[], bosses=[], powers=[];
+let bgY=0;
 
-const scoreEl = document.getElementById('score');
-const heartsDOM = document.getElementById('hearts');
-const powerRow = document.getElementById('powerRow');
+const player={x:0,y:0,w:70,h:70,lives:3,fireLevel:0,shieldUntil:0};
 
-const player = { x:0,y:0,w:70,h:70,lives:3,fireLevel:0,shieldUntil:0 };
-let bulletsP = [], bulletsE = [], enemies=[], bosses=[], powers=[];
-let bgY = 0;
-
-/* ========== PLAYER POSITION ========== */
 function positionPlayer(){
-  const r = frame.getBoundingClientRect();
-  player.w = r.width * 0.16;
+  const r=frame.getBoundingClientRect();
+  player.w = r.width*0.16;
   player.h = player.w;
-  player.x = (r.width - player.w)/2;
-  player.y = r.height - player.h - 20;
+  player.x = (r.width-player.w)/2;
+  player.y = r.height-player.h-20;
 }
 
-/* ========== HUD ========== */
+/* HUD */
+const scoreEl=document.getElementById('score');
+const heartsDOM=document.getElementById('hearts');
 function updateHUD(){
   scoreEl.textContent = score;
   heartsDOM.innerHTML = '';
   for(let i=0;i<player.lives;i++){
-    const img=document.createElement('img'); img.src=PATHS.heart; img.style.width='32px';
-    heartsDOM.appendChild(img);
+    const h=document.createElement('img'); h.src=PATHS.heart; h.style.width='32px'; heartsDOM.appendChild(h);
   }
-
-  powerRow.innerHTML = '';
-  if(player.fireLevel>0){ const p=document.createElement('img'); p.src=PATHS.powerDouble; p.style.width='40px'; powerRow.appendChild(p); }
-  if(player.shieldUntil > Date.now()){ const s=document.createElement('img'); s.src=PATHS.powerShield; s.style.width='40px'; powerRow.appendChild(s); }
 }
 
-/* ========== BUTTON CONTROLS ========== */
-const btnLeft = document.getElementById('btnLeft');
-const btnRight = document.getElementById('btnRight');
+/* BUTTON CONTROLS */
+const btnLeft=document.getElementById('btnLeft');
+const btnRight=document.getElementById('btnRight');
+btnLeft.addEventListener('touchstart',()=>{ player.x -= 45; clampPlayer(); });
+btnRight.addEventListener('touchstart',()=>{ player.x += 45; clampPlayer(); });
+function clampPlayer(){ const r=frame.getBoundingClientRect(); player.x=Math.max(6,Math.min(r.width-player.w-6,player.x)); }
 
-btnLeft.addEventListener('touchstart', ()=>{ player.x -= 50; clampPlayer(); });
-btnRight.addEventListener('touchstart', ()=>{ player.x += 50; clampPlayer(); });
+/* SHOOT */
+function shootPlayer(){ bulletsP.push({x:player.x+player.w/2-6,y:player.y-26,w:12,h:26,spd:11}); }
 
-function clampPlayer(){
-  const r = frame.getBoundingClientRect();
-  player.x = Math.max(6, Math.min(r.width - player.w - 6, player.x));
-}
-
-/* ========== START GAME ========== */
-function startGame(){
-  loadingEl.style.display='none';
-  positionPlayer();
-  running=true;
-  lastPlayerShot=Date.now();
-  requestAnimationFrame(loop);
-}
-
-/* ========== UPDATE ========== */
-function update(){
-  const r = frame.getBoundingClientRect();
-
-  // background scroll
-  bgY += 1.4; if(bgY >= r.height) bgY = 0;
-
-  // auto fire
-  if(Date.now() - lastPlayerShot > PLAYER_FIRE_MS){ lastPlayerShot=Date.now(); shootPlayer(); }
-
-  // enemy spawn
-  if(Date.now() - lastEnemySpawn > ENEMY_SPAWN_MS){ lastEnemySpawn=Date.now(); spawnEnemy(); }
-
-  bulletsP.forEach(b => b.y -= b.spd);
-  bulletsP = bulletsP.filter(b => b.y > -60);
-
-  enemies.forEach(e => e.y += e.speed);
-  enemies = enemies.filter(e => e.y < r.height + 60);
-}
-
-/* ========== SHOOTING ========== */
-function shootPlayer(){
-  bulletsP.push({ x: player.x + player.w/2 - 6, y: player.y - 20, w:12, h:26, spd:14 });
-}
-
-/* ========== SPAWN ENEMY ========== */
+/* SPAWN ENEMY */
 function spawnEnemy(){
-  const r = frame.getBoundingClientRect();
-  enemies.push({ x: Math.random()*(r.width-50), y:-70, w:60, h:60, speed:2 + Math.random()*1 });
+  const r=frame.getBoundingClientRect();
+  enemies.push({ x:Math.random()*(r.width-60), y:-70, w:60, h:60, speed:2+Math.random()*1.2, lastShot:Date.now() });
 }
 
-/* ========== DRAW ========== */
+/* SPAWN BOSS */
+function spawnBossWave(){
+  const r=frame.getBoundingClientRect();
+  for(let i=0;i<bossWaveCount;i++){
+    bosses.push({ x:40+i*120, y:-150, w:120, h:120, hp:45+(bossWaveCount*10), vx:1.2, lastShot:Date.now() });
+  }
+  bossWaveCount++;
+  nextBossScore += 200;
+}
+
+/* LOOP UPDATE */
+function update(){
+  const r=frame.getBoundingClientRect();
+
+  /* background */
+  bgY+=1.4; if(bgY>=r.height) bgY=0;
+
+  /* auto-fire */
+  if(Date.now()-lastPlayerShot > PLAYER_FIRE_MS){ lastPlayerShot=Date.now(); shootPlayer(); }
+
+  /* enemy spawn */
+  if(Date.now()-lastEnemySpawn > ENEMY_SPAWN_MS){ lastEnemySpawn=Date.now(); spawnEnemy(); }
+
+  /* enemy bullets */
+  enemies.forEach(e=>{
+    if(Date.now()-e.lastShot > ENEMY_FIRE_MS){ e.lastShot=Date.now(); bulletsE.push({x:e.x+e.w/2-6,y:e.y+e.h,w:12,h:26,spd:6}); }
+  });
+
+  /* boss bullets */
+  bosses.forEach(b=>{
+    if(Date.now()-b.lastShot > 800){ b.lastShot=Date.now(); bulletsE.push({x:b.x+b.w/2-8,y:b.y+b.h,w:14,h:30,spd:6}); }
+  });
+
+  bulletsP.forEach(b=>b.y-=b.spd); bulletsP=bulletsP.filter(b=>b.y>-40);
+  bulletsE.forEach(b=>b.y+=b.spd); bulletsE=bulletsE.filter(b=>b.y<r.height+40);
+
+  enemies.forEach(e=>e.y+=e.speed);
+  enemies = enemies.filter(e=>e.y<r.height+80);
+
+  bosses.forEach(b=>{
+    b.y+=0.8;
+    b.x+=b.vx;
+    if(b.x<=6 || b.x+b.w>=r.width-6) b.vx*=-1;
+  });
+
+  /* COLLISIONS: Player bullets → enemies */
+  bulletsP = bulletsP.filter(pb=>{
+    let hit=false;
+    enemies = enemies.filter(e=>{
+      if(pb.x < e.x+e.w && pb.x+pb.w > e.x && pb.y < e.y+e.h && pb.y+pb.h > e.y){ hit=true; score+=10; return false; }
+      return true;
+    });
+    bosses.forEach(b=>{
+      if(pb.x < b.x+b.w && pb.x+pb.w > b.x && pb.y < b.y+b.h && pb.y+pb.h > b.y){ hit=true; b.hp--; score+=2; }
+    });
+    return !hit;
+  });
+
+  bosses = bosses.filter(b=>b.hp>0);
+
+  /* enemy bullets → player */
+  bulletsE = bulletsE.filter(eb=>{
+    if(eb.x < player.x+player.w && eb.x+eb.w > player.x && eb.y < player.y+player.h && eb.y+eb.h > player.y){ playerHit(); return false; }
+    return true;
+  });
+
+  /* boss wave trigger */
+  if(score >= nextBossScore){ spawnBossWave(); }
+
+  updateHUD();
+}
+
+function playerHit(){
+  if(player.shieldUntil > Date.now()) return;
+  player.lives--;
+  if(player.lives<=0){ alert("Game Over — Score: "+score); location.reload(); }
+}
+
+/* DRAW */
 function draw(){
-  const r = frame.getBoundingClientRect();
+  const r=frame.getBoundingClientRect();
   ctx.clearRect(0,0,r.width,r.height);
 
   if(imgs.bg){
-    const h=r.height;
-    const y=bgY%h;
+    const h=r.height, y=bgY%h;
     ctx.drawImage(imgs.bg,0,y-h,r.width,h);
     ctx.drawImage(imgs.bg,0,y,r.width,h);
   }
 
-  enemies.forEach(e => ctx.drawImage(imgs.enemy,e.x,e.y,e.w,e.h));
-  bulletsP.forEach(b => ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h));
-  ctx.drawImage(imgs.player, player.x, player.y, player.w, player.h);
+  enemies.forEach(e=>ctx.drawImage(imgs.enemy,e.x,e.y,e.w,e.h));
+  bosses.forEach(b=>ctx.drawImage(imgs.boss,b.x,b.y,b.w,b.h));
+  bulletsP.forEach(b=>ctx.drawImage(imgs.bulletP,b.x,b.y,b.w,b.h));
+  bulletsE.forEach(b=>ctx.drawImage(imgs.bulletE,b.x,b.y,b.w,b.h));
+
+  ctx.drawImage(imgs.player,player.x,player.y,player.w,player.h);
 }
 
-/* ========== LOOP ========== */
-function loop(){
-  if(!running) return;
-  update(); draw(); updateHUD();
-  requestAnimationFrame(loop);
-}
+/* MAIN LOOP */
+function loop(){ if(!running) return; update(); draw(); requestAnimationFrame(loop); }
+
+/* START */
+function startGame(){ loadingEl.style.display='none'; positionPlayer(); running=true; requestAnimationFrame(loop); }
+
 </script></body>
 </html>
